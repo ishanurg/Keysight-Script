@@ -3,22 +3,27 @@ import time
 import csv
 import matplotlib.pyplot as plt
 
-test_duration_minutes  = 1.0     # Total time to run the test (in minutes)
-pulse_interval_seconds = 2.0     # Time to wait between each pulse trigger (in seconds)
+# ==============================================================================
+# 1. TEST CONFIGURATION VARIABLES (Edit these as needed)
+# ==============================================================================
+# Overall Duration Settings
+test_duration_minutes  = 1.0     # Total time to run the continuous loop (in minutes)
+cycle_interval_seconds = 6.0     # Total time between the START of each cycle 
+                                 # (e.g., 4s triangle + 2s idle time = 6s cycle)
 
 # Current and Voltage Settings
-base_current  = 0.0     # Base current in Amps (e.g., 0.0 A = 0 mA)
-peak_current  = 0.04    # Peak current in Amps (e.g., 0.04 A = 40 mA)
+base_current  = 0.005   # Starting and ending current of the triangle in Amps (5 mA)
+peak_current  = 0.020   # Peak current of the triangle in Amps (20 mA)
 voltage_limit = 5.0     # Compliance voltage limit in Volts
 
-# Single Pulse Timing Settings
-pulse_delay   = 0.01    # Delay before the pulse starts in seconds
-pulse_width   = 0.05    # Duration of the peak pulse in seconds
-total_time    = 0.1     # Total time to record data per pulse event in seconds
+# Triangle Sweep Timing
+ramp_up_time   = 2.0    # Time to ramp from base to peak (seconds)
+ramp_down_time = 2.0    # Time to ramp from peak back to base (seconds)
+total_sweep_time = ramp_up_time + ramp_down_time  # Total active pulse = 4.0 seconds
 
 # Measurement Settings
-num_points    = 500     # Number of measurement points PER PULSE (keep reasonable for long tests)
-csv_filename  = "b2900_pulse_data.csv" # File to save the long-run data
+num_points    = 400     # Number of data points per triangle (400 pts = very smooth 10ms steps)
+csv_filename  = "b2900_triangle_data.csv" # File to save the long-run data
 # ==============================================================================
 
 rm = pyvisa.ResourceManager()
@@ -31,7 +36,7 @@ master_volt = []
 
 try:
     nst = rm.open_resource(visa_addr)
-    nst.timeout = 10000  # 10 seconds timeout for standard operations
+    nst.timeout = 10000  
     
     print("Connected to --> " + nst.query("*IDN?").strip())
     
@@ -40,43 +45,49 @@ try:
     nst.write("*CLS")
     
     # --------------------------------------------------------------------------
-    # 2. SOURCE & MEASUREMENT CONFIGURATION (Done once)
+    # 2. SOURCE & MEASUREMENT CONFIGURATION (Triangle Sweep)
     # --------------------------------------------------------------------------
     nst.write(":SOUR:FUNC:MODE CURR")
-    nst.write(":SOUR:FUNC:SHAP PULS")
-    nst.write(f":SOUR:CURR {base_current}")
-    nst.write(f":SOUR:CURR:TRIG {peak_current}")
+    nst.write(":SOUR:CURR:MODE SWE")                 # Use Sweep mode instead of fixed pulse
     
+    nst.write(f":SOUR:CURR:STAR {base_current}")     # Start at 5mA
+    nst.write(f":SOUR:CURR:STOP {peak_current}")     # Peak at 20mA
+    
+    # Set fixed range to max current to prevent range-switching delays
     range_val = max(abs(base_current), abs(peak_current))
     if range_val == 0: range_val = 1e-3
     nst.write(f":SOUR:CURR:RANG {range_val}")
     
-    nst.write(f":SOUR:PULS:DEL {pulse_delay}")
-    nst.write(f":SOUR:PULS:WIDT {pulse_width}")
+    nst.write(f":SOUR:SWE:POIN {num_points}")        # Total points in the sweep
+    nst.write(":SOUR:SWE:DIR UPDO")                  # Up-Down Sweep (Start -> Stop -> Start)
     
     nst.write(":SENS:FUNC \"VOLT\",\"CURR\"")
     nst.write(f":SENS:VOLT:PROT {voltage_limit}")
     
-    step_time = total_time / num_points
-    aperture_time = step_time * 0.5
+    # Calculate step time (how long the SMU stays at each micro-step of the triangle)
+    step_time = total_sweep_time / num_points
+    aperture_time = step_time * 0.5                  # 50% integration time
+    
     nst.write(f":SENS:VOLT:APER {aperture_time}")
     nst.write(f":SENS:CURR:APER {aperture_time}")
     
+    # Trigger routing: Timer handles the source steps, Acquisition syncs to Source
+    nst.write(f":TRIG:TRAN:COUN {num_points}")
+    nst.write(":TRIG:TRAN:SOUR TIM")
+    nst.write(f":TRIG:TRAN:TIM {step_time}")
+    
     nst.write(f":TRIG:ACQ:COUN {num_points}")
-    nst.write(":TRIG:ACQ:SOUR TIM")
-    nst.write(f":TRIG:ACQ:TIM {step_time}")
-    nst.write(":TRIG:TRAN:COUN 1")
-    nst.write(":TRIG:TRAN:SOUR AINT")
+    nst.write(":TRIG:ACQ:SOUR AINT")                 # Auto Internal: Sync measurement exactly to source step
     
     nst.write(":FORM:DATA ASC")
     
     # --------------------------------------------------------------------------
     # 3. CONTINUOUS TEST LOOP
     # --------------------------------------------------------------------------
-    print(f"\nStarting {test_duration_minutes}-minute test...")
-    print(f"A pulse will be triggered every {pulse_interval_seconds} seconds.")
+    print(f"\nStarting {test_duration_minutes}-minute triangle pulse test...")
+    print(f"A 4-second triangle will trigger every {cycle_interval_seconds} seconds.")
     
-    nst.write(":OUTP ON") # Turn on base current
+    nst.write(":OUTP ON") # Turns on holding at the start point (5mA)
     
     test_duration_seconds = test_duration_minutes * 60.0
     start_time = time.time()
@@ -86,20 +97,19 @@ try:
         loop_start = time.time()
         elapsed_test_time = loop_start - start_time
         
-        print(f"[{elapsed_test_time:.1f}s] Triggering Pulse #{pulse_count}...")
+        print(f"[{elapsed_test_time:.1f}s] Triggering Triangle Cycle #{pulse_count}...")
         
-        # Arm and trigger the measurement and pulse
+        # Arm measurement and source, then wait for completion
         nst.write(":INIT:ACQ")
         nst.write(":INIT:TRAN")
-        nst.write("*WAI") # Wait for this specific pulse to finish
+        nst.write("*WAI") 
         
         # Fetch the short burst of data
         time_data = nst.query_ascii_values(":FETC:ARR:TIME?")
         curr_data = nst.query_ascii_values(":FETC:ARR:CURR?")
         volt_data = nst.query_ascii_values(":FETC:ARR:VOLT?")
         
-        # The instrument returns time relative to the trigger (0 to 0.1s).
-        # We need to add the elapsed test time so the graph continuously moves forward.
+        # Convert instrument relative time to continuous absolute time
         absolute_time_data = [t + elapsed_test_time for t in time_data]
         
         # Append to master lists
@@ -107,9 +117,9 @@ try:
         master_curr.extend(curr_data)
         master_volt.extend(volt_data)
         
-        # Calculate how long to sleep before the next pulse
+        # Calculate how long to sleep before starting the next triangle
         processing_time = time.time() - loop_start
-        sleep_time = pulse_interval_seconds - processing_time
+        sleep_time = cycle_interval_seconds - processing_time
         if sleep_time > 0:
             time.sleep(sleep_time)
             
@@ -117,10 +127,10 @@ try:
 
     # End of test
     nst.write(":OUTP OFF")
-    print(f"\nTest complete! Total pulses triggered: {pulse_count - 1}")
+    print(f"\nTest complete! Total cycles triggered: {pulse_count - 1}")
 
     # --------------------------------------------------------------------------
-    # 4. SAVE TO CSV (Highly recommended for long tests)
+    # 4. SAVE TO CSV
     # --------------------------------------------------------------------------
     print(f"Saving data to {csv_filename}...")
     with open(csv_filename, mode='w', newline='') as file:
@@ -133,7 +143,7 @@ try:
     # 5. PLOT THE GRAPH
     # --------------------------------------------------------------------------
     print("Generating plot...")
-    master_curr_ma = [c * 1000 for c in master_curr] # Convert to mA
+    master_curr_ma = [c * 1000 for c in master_curr] # Convert to mA for plotting
 
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
@@ -150,7 +160,7 @@ try:
     ax2.plot(master_time, master_volt, color=color2, linestyle='--', alpha=0.7, label='Voltage (V)')
     ax2.tick_params(axis='y', labelcolor=color2)
 
-    plt.title(f'Keysight B2900 Continuous Pulse Test ({test_duration_minutes} min)', fontsize=14)
+    plt.title(f'Keysight B2900 Triangle Pulse Test ({test_duration_minutes} min)', fontsize=14)
     fig.tight_layout()  
     plt.show()
 
