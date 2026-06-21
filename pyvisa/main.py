@@ -1,19 +1,24 @@
+import sys
+import os
+import ctypes
+from ctypes import wintypes
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 import numpy as np
 import pandas as pd
-import os
 import math
-import subprocess
 import threading
 import queue
 import pyvisa
 import csv
-from datetime import datetime
+import time
 
-# ------------------------------------------------------------------------
-# 1. Global Theme Architecture
-# ------------------------------------------------------------------------
+# PyQtGraph with OpenGL Hardware Acceleration
+import pyqtgraph as pg
+from PyQt5 import QtWidgets, QtCore
+
+pg.setConfigOptions(useOpenGL=True, antialias=True)
+
 # ------------------------------------------------------------------------
 # 1. Global Theme Architecture
 # ------------------------------------------------------------------------
@@ -31,10 +36,8 @@ class Theme:
     C_HL   = '#dc2626'
     C_MARK = '#7c3aed'
     
-    # --- ADDED MISSING COLOR CODES ---
     ERR    = '#ef4444' 
     ACC_H  = '#2563eb'
-    # ---------------------------------
     
     is_dark = False
 
@@ -61,26 +64,46 @@ class Theme:
 
 TRACE_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#dc2626', '#7c3aed', '#db2777', '#06b6d4', '#059669']
 
-# ------------------------------------------------------------------------
-# 2. Native Git Version Control Engine
-# ------------------------------------------------------------------------
-class GitEngine:
-    @staticmethod
-    def is_git_installed():
-        try:
-            subprocess.run(["git", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+def set_hd_resolution():
+    if sys.platform == 'win32':
+        try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception: pass
 
 # ------------------------------------------------------------------------
-# 3. Interactive Chart Properties Editor 
+# 2. Smooth Scrollable Frame Utility
+# ------------------------------------------------------------------------
+class VerticalScrollFrame(ttk.Frame):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.canvas = tk.Canvas(self, bg=Theme.PNL, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.inner = tk.Frame(self.canvas, bg=Theme.PNL)
+
+        self.window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        self.inner.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.window, width=e.width))
+
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_mousewheel(self, event):
+        x, y = self.canvas.winfo_pointerxy()
+        widget = self.canvas.winfo_containing(x, y)
+        if widget and str(widget).startswith(str(self.canvas)):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+# ------------------------------------------------------------------------
+# 3. Chart Properties & Analytics Classes
 # ------------------------------------------------------------------------
 class ChartPropertiesDialog(tk.Toplevel):
     def __init__(self, parent, chart_obj, chart_key, callback):
         super().__init__(parent)
         self.title(f"Chart Properties - {chart_obj.title}")
-        self.geometry("550x650")
+        self.geometry("600x700")
         self.configure(bg=Theme.BG)
         self.transient(parent)
         self.grab_set()
@@ -89,45 +112,44 @@ class ChartPropertiesDialog(tk.Toplevel):
         self.chart_key = chart_key
         self.callback = callback
         self.trace_entries = {}
-
         self._build_ui()
 
     def _build_ui(self):
         container = tk.Frame(self, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.BRD)
         container.pack(fill='both', expand=True, padx=12, pady=12)
 
-        lbl_frm = tk.LabelFrame(container, text=" Axis Labels & Titles ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
+        lbl_frm = tk.LabelFrame(container, text=" Axis Labels & Titles ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 10, 'bold'))
         lbl_frm.pack(fill='x', padx=10, pady=10)
 
-        tk.Label(lbl_frm, text="Chart Title:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.ent_title = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 10))
+        tk.Label(lbl_frm, text="Chart Title:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        self.ent_title = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 9))
         self.ent_title.insert(0, self.chart.title)
         self.ent_title.grid(row=0, column=1, padx=5, pady=5)
 
-        tk.Label(lbl_frm, text="X-Axis Label:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
-        self.ent_xlabel = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 10))
+        tk.Label(lbl_frm, text="X-Axis Label:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
+        self.ent_xlabel = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 9))
         self.ent_xlabel.insert(0, self.chart.x_label)
         self.ent_xlabel.grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Label(lbl_frm, text="Y-Axis Label:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=2, column=0, padx=5, pady=5, sticky='e')
-        self.ent_ylabel = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 10))
+        tk.Label(lbl_frm, text="Y-Axis Label:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=2, column=0, padx=5, pady=5, sticky='e')
+        self.ent_ylabel = tk.Entry(lbl_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=30, font=('Segoe UI', 9))
         self.ent_ylabel.insert(0, self.chart.y_label)
         self.ent_ylabel.grid(row=2, column=1, padx=5, pady=5)
 
-        scale_frm = tk.LabelFrame(container, text=" Fixed Y-Axis Scale Bounds (Leave blank for Auto-Scale) ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
+        scale_frm = tk.LabelFrame(container, text=" Fixed Y-Axis Scale Bounds ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 10, 'bold'))
         scale_frm.pack(fill='x', padx=10, pady=5)
 
-        tk.Label(scale_frm, text="Y-Axis Min:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.ent_ymin = tk.Entry(scale_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 10))
+        tk.Label(scale_frm, text="Y-Min:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        self.ent_ymin = tk.Entry(scale_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 9))
         if self.chart.y_min_override is not None: self.ent_ymin.insert(0, str(self.chart.y_min_override))
         self.ent_ymin.grid(row=0, column=1, padx=5, pady=5)
 
-        tk.Label(scale_frm, text="Y-Axis Max:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=2, padx=5, pady=5, sticky='e')
-        self.ent_ymax = tk.Entry(scale_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 10))
+        tk.Label(scale_frm, text="Y-Max:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=2, padx=5, pady=5, sticky='e')
+        self.ent_ymax = tk.Entry(scale_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 9))
         if self.chart.y_max_override is not None: self.ent_ymax.insert(0, str(self.chart.y_max_override))
         self.ent_ymax.grid(row=0, column=3, padx=5, pady=5)
 
-        trace_frm = tk.LabelFrame(container, text=" Edit Trace Names (Legend) ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
+        trace_frm = tk.LabelFrame(container, text=" Edit Trace Names (Legend) ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 10, 'bold'))
         trace_frm.pack(fill='both', expand=True, padx=10, pady=10)
 
         cv = tk.Canvas(trace_frm, bg=Theme.PNL, highlightthickness=0)
@@ -148,7 +170,7 @@ class ChartPropertiesDialog(tk.Toplevel):
                 
                 tk.Label(tr_container, text=f"ID: {t_id[:15]}...", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9)).grid(row=row_idx, column=1, padx=5, sticky='w')
                 
-                ent_name = tk.Entry(tr_container, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=25, font=('Segoe UI', 10))
+                ent_name = tk.Entry(tr_container, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=25, font=('Segoe UI', 9))
                 ent_name.insert(0, trace.get("trace_name", t_id))
                 ent_name.grid(row=row_idx, column=2, padx=5, pady=4)
                 
@@ -158,8 +180,8 @@ class ChartPropertiesDialog(tk.Toplevel):
         btn_frm = tk.Frame(container, bg=Theme.PNL)
         btn_frm.pack(fill='x', padx=10, pady=10)
 
-        tk.Button(btn_frm, text="Apply Chart Properties", bg=Theme.ACC, fg='#ffffff', font=('Segoe UI', 11, 'bold'), relief='flat', padx=15, pady=5, command=self._apply).pack(side='right', padx=5)
-        tk.Button(btn_frm, text="Cancel", bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 11), relief='flat', padx=15, pady=5, command=self.destroy).pack(side='right', padx=5)
+        tk.Button(btn_frm, text="Apply Chart Properties", bg=Theme.ACC, fg='#ffffff', font=('Segoe UI', 10, 'bold'), relief='flat', padx=15, pady=5, command=self._apply).pack(side='right', padx=5)
+        tk.Button(btn_frm, text="Cancel", bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 10), relief='flat', padx=15, pady=5, command=self.destroy).pack(side='right', padx=5)
 
     def _apply(self):
         try:
@@ -169,177 +191,11 @@ class ChartPropertiesDialog(tk.Toplevel):
             messagebox.showerror("Scale Error", "Y-Axis Min/Max must be valid numbers.")
             return
 
-        props = {
-            "title": self.ent_title.get().strip(),
-            "x_label": self.ent_xlabel.get().strip(),
-            "y_label": self.ent_ylabel.get().strip(),
-            "y_min": y_min,
-            "y_max": y_max
-        }
+        props = {"title": self.ent_title.get().strip(), "x_label": self.ent_xlabel.get().strip(), "y_label": self.ent_ylabel.get().strip(), "y_min": y_min, "y_max": y_max}
         trace_names = {t_id: ent.get().strip() for t_id, ent in self.trace_entries.items()}
-
         self.callback(self.chart_key, props, trace_names)
         self.destroy()
 
-# ------------------------------------------------------------------------
-# 4. Spreadsheet CSV Import Dialog
-# ------------------------------------------------------------------------
-class DataImportDialog(tk.Toplevel):
-    def __init__(self, parent, df, filename, callback, existing_id=None, existing_config=None):
-        super().__init__(parent)
-        title_prefix = "Re-configure Plot" if existing_id else "CSV Data Import Configuration"
-        self.title(f"{title_prefix} - {filename}")
-        self.geometry("950x700")
-        self.configure(bg=Theme.BG)
-        self.transient(parent)
-        self.grab_set()
-
-        self.df = df
-        self.filename = filename
-        self.callback = callback
-        self.existing_id = existing_id
-        self.existing_config = existing_config
-
-        self._build_ui()
-        if self.existing_config:
-            self._load_existing_config()
-        else:
-            self._auto_guess_columns()
-
-    def _build_ui(self):
-        ctrl_frame = tk.Frame(self, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.BRD)
-        ctrl_frame.pack(fill='x', padx=10, pady=10)
-
-        map_frm = tk.LabelFrame(ctrl_frame, text=" Column Mapping ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
-        map_frm.pack(side='left', fill='y', padx=10, pady=10)
-
-        tk.Label(map_frm, text="X-Axis (Time/Index):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.cb_x = ttk.Combobox(map_frm, values=list(self.df.columns), state='readonly', width=22, font=('Segoe UI', 10))
-        self.cb_x.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Label(map_frm, text="Y-Axis (Value):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
-        self.cb_y = ttk.Combobox(map_frm, values=list(self.df.columns), state='readonly', width=22, font=('Segoe UI', 10))
-        self.cb_y.grid(row=1, column=1, padx=5, pady=5)
-
-        self.btn_edit_axes = tk.Button(map_frm, text="✎ Edit Axes", bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 9), relief='flat', command=self._unlock_axes)
-        
-        slice_frm = tk.LabelFrame(ctrl_frame, text=" Data Processing ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
-        slice_frm.pack(side='left', fill='y', padx=10, pady=10)
-
-        tk.Label(slice_frm, text="Start Row:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.ent_start = tk.Entry(slice_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=12, font=('Segoe UI', 10))
-        self.ent_start.insert(0, "0")
-        self.ent_start.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Label(slice_frm, text="End Row:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
-        self.ent_end = tk.Entry(slice_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=12, font=('Segoe UI', 10))
-        self.ent_end.insert(0, str(len(self.df)))
-        self.ent_end.grid(row=1, column=1, padx=5, pady=5)
-
-        tk.Label(slice_frm, text="Y-Scale Multiplier:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=2, padx=5, pady=5, sticky='e')
-        self.ent_scale = tk.Entry(slice_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=10, font=('Segoe UI', 10))
-        self.ent_scale.insert(0, "1.0")
-        self.ent_scale.grid(row=0, column=3, padx=5, pady=5)
-
-        style_frm = tk.LabelFrame(ctrl_frame, text=" Trace Aesthetics ", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
-        style_frm.pack(side='left', fill='y', padx=10, pady=10)
-
-        tk.Label(style_frm, text="Trace Name:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.ent_name = tk.Entry(style_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=18, font=('Segoe UI', 10))
-        self.ent_name.insert(0, self.filename)
-        self.ent_name.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Label(style_frm, text="Line Style:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
-        self.cb_style = ttk.Combobox(style_frm, values=["Solid", "Dashed", "Dotted"], state='readonly', width=16, font=('Segoe UI', 10))
-        self.cb_style.current(0)
-        self.cb_style.grid(row=1, column=1, padx=5, pady=5)
-
-        prev_frm = tk.Frame(self, bg=Theme.BG)
-        prev_frm.pack(fill='both', expand=True, padx=10, pady=(0, 10))
-
-        tk.Label(prev_frm, text=f"Data Preview (First 200 of {len(self.df):,} rows)", bg=Theme.BG, fg=Theme.DIM, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
-
-        tv_container = tk.Frame(prev_frm)
-        tv_container.pack(fill='both', expand=True)
-        
-        vsb = ttk.Scrollbar(tv_container, orient="vertical")
-        hsb = ttk.Scrollbar(tv_container, orient="horizontal")
-        
-        self.tv = ttk.Treeview(tv_container, columns=list(self.df.columns), show='headings', yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        vsb.config(command=self.tv.yview); hsb.config(command=self.tv.xview)
-
-        self.tv.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        tv_container.grid_columnconfigure(0, weight=1); tv_container.grid_rowconfigure(0, weight=1)
-
-        for col in self.df.columns:
-            self.tv.heading(col, text=col)
-            self.tv.column(col, width=140)
-
-        for _, row in self.df.head(200).iterrows():
-            self.tv.insert("", "end", values=list(row))
-
-        btn_frm = tk.Frame(self, bg=Theme.BG)
-        btn_frm.pack(fill='x', padx=10, pady=10)
-
-        apply_text = "Apply Configuration" if self.existing_id else "Load Selected Data"
-        tk.Button(btn_frm, text=apply_text, bg=Theme.ACC, fg='#ffffff', font=('Segoe UI', 11, 'bold'), relief='flat', padx=15, pady=5, command=self._apply).pack(side='right', padx=5)
-        tk.Button(btn_frm, text="Cancel", bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 11), relief='flat', padx=15, pady=5, command=self.destroy).pack(side='right', padx=5)
-
-    def _auto_guess_columns(self):
-        cx = next((c for c in self.df.columns if any(k in str(c).lower() for k in ['time', 'sec', 'x'])), None)
-        cy = next((c for c in self.df.columns if any(k in str(c).lower() for k in ['reading', 'val', 'mv', 'emf', 'amp', 'y'])), None)
-        if cx: self.cb_x.set(cx)
-        elif len(self.df.columns) > 0: self.cb_x.current(0)
-        if cy: self.cb_y.set(cy)
-        elif len(self.df.columns) > 1: self.cb_y.current(1)
-
-    def _load_existing_config(self):
-        self.cb_x.set(self.existing_config["x_col"])
-        self.cb_y.set(self.existing_config["y_col"])
-        self.cb_x.config(state='disabled')
-        self.cb_y.config(state='disabled')
-        self.btn_edit_axes.grid(row=0, column=2, rowspan=2, padx=10, sticky='ns')
-
-        self.ent_start.delete(0, tk.END); self.ent_start.insert(0, str(self.existing_config["start_row"]))
-        self.ent_end.delete(0, tk.END); self.ent_end.insert(0, str(self.existing_config["end_row"]))
-        self.ent_scale.delete(0, tk.END); self.ent_scale.insert(0, str(self.existing_config["scale"]))
-        self.ent_name.delete(0, tk.END); self.ent_name.insert(0, self.existing_config["trace_name"])
-        self.cb_style.set(self.existing_config["line_style"])
-
-    def _unlock_axes(self):
-        self.cb_x.config(state='readonly')
-        self.cb_y.config(state='readonly')
-        self.btn_edit_axes.grid_forget()
-
-    def _apply(self):
-        x_col = self.cb_x.get()
-        y_col = self.cb_y.get()
-        style = self.cb_style.get()
-        t_name = self.ent_name.get().strip() or self.filename
-
-        if not x_col or not y_col:
-            messagebox.showerror("Selection Error", "Please map both X and Y columns.")
-            return
-
-        try:
-            start_row = int(self.ent_start.get())
-            end_row = int(self.ent_end.get())
-            scale = float(self.ent_scale.get())
-        except ValueError:
-            messagebox.showerror("Selection Error", "Row bounds must be integers and Scale must be a number.")
-            return
-
-        start_row = max(0, start_row)
-        end_row = min(len(self.df), end_row)
-
-        self.callback(self.filename, self.df, x_col, y_col, start_row, end_row, t_name, scale, style, self.existing_id)
-        self.destroy()
-
-# ------------------------------------------------------------------------
-# 5. Canvas Hover Tooltip System
-# ------------------------------------------------------------------------
 class ListboxTooltip:
     def __init__(self, listbox, get_data_func):
         self.listbox = listbox
@@ -359,10 +215,8 @@ class ListboxTooltip:
             if data:
                 text = f"Trace: {data.get('trace_name', 'Unknown')}\nX: {data.get('x_col', 'N/A')} | Y: {data.get('y_col', 'N/A')}"
                 self.show_tooltip(event, text)
-            else: 
-                self.hide_tooltip()
-        else: 
-            self.hide_tooltip()
+            else: self.hide_tooltip()
+        else: self.hide_tooltip()
 
     def show_tooltip(self, event, text):
         if self.tw: self.hide_tooltip()
@@ -371,7 +225,7 @@ class ListboxTooltip:
         self.tw = tk.Toplevel(self.listbox)
         self.tw.wm_overrideredirect(True)
         self.tw.wm_geometry(f"+{x}+{y}")
-        tk.Label(self.tw, text=text, bg=Theme.PNL2, fg=Theme.FG, relief='solid', borderwidth=1, font=("Segoe UI", 10)).pack(padx=4, pady=2)
+        tk.Label(self.tw, text=text, bg=Theme.PNL2, fg=Theme.FG, relief='solid', borderwidth=1, font=("Segoe UI", 9)).pack(padx=4, pady=2)
 
     def hide_tooltip(self, event=None):
         if self.tw:
@@ -379,9 +233,6 @@ class ListboxTooltip:
             self.tw = None
         self.current_idx = None
 
-# ------------------------------------------------------------------------
-# 6. Math Engine & High Performance Canvas
-# ------------------------------------------------------------------------
 class MathEngine:
     @staticmethod
     def compute_derivative(x, y):
@@ -410,26 +261,18 @@ class AdvancedAnalysisCanvas:
         
         self.chart_key = chart_key
         self.title = title
-        self.x_label = ""
-        self.y_label = ""
+        self.x_label, self.y_label = "", ""
 
         self.w = self.h = 0
         self.cw = self.ch = 1
-        self.pad_l = 85
-        self.pad_r = 25
+        self.pad_l, self.pad_r = 95, 25
         self.pad_t = 45 if title else 30
         self.pad_b = 65  
         self.num_grid = 5
 
-        self.datasets = {}         
-        self.analysis_layers = {}  
-        self.labels = []           
-
-        self.view_xmin = self.view_xmax = 0.0
-        self.view_ymin = self.view_ymax = 0.0
-        
-        self.y_min_override = None
-        self.y_max_override = None
+        self.datasets, self.analysis_layers, self.labels = {}, {}, []
+        self.view_xmin = self.view_xmax = self.view_ymin = self.view_ymax = 0.0
+        self.y_min_override = self.y_max_override = None
 
         self.on_view_changed = on_view_changed_callback
         self.on_edit_request = on_edit_request_callback
@@ -451,7 +294,6 @@ class AdvancedAnalysisCanvas:
         self.canvas.bind('<MouseWheel>', self._on_mouse_wheel)
         self.canvas.bind('<Button-4>', self._on_mouse_wheel)
         self.canvas.bind('<Button-5>', self._on_mouse_wheel)
-        
         self.canvas.bind('<Button-3>', self._show_context_menu)
         self.canvas.bind('<Button-2>', self._show_context_menu)
         
@@ -462,7 +304,7 @@ class AdvancedAnalysisCanvas:
 
     def _show_context_menu(self, e):
         self.canvas.focus_set()
-        menu = tk.Menu(self.canvas, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 11))
+        menu = tk.Menu(self.canvas, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
         if self.on_edit_request:
             menu.add_command(label="⚙ Properties (Title, Axes, Scale)", command=lambda: self.on_edit_request(self))
             menu.add_separator()
@@ -471,9 +313,7 @@ class AdvancedAnalysisCanvas:
         menu.tk_popup(e.x_root, e.y_root)
 
     def _clear_annotations(self):
-        self.labels.clear()
-        self.m1 = self.m2 = None
-        self.redraw()
+        self.labels.clear(); self.m1 = self.m2 = None; self.redraw()
 
     def _create_interactive_overlays(self):
         self.vl = self.canvas.create_line(0,0,0,0, fill=Theme.C_HL, dash=(3,3), state='hidden', tags='hover')
@@ -489,8 +329,7 @@ class AdvancedAnalysisCanvas:
 
     def reset_global_viewport(self):
         if not self.datasets and not self.analysis_layers:
-            self.redraw()
-            return
+            self.redraw(); return
         
         all_xmin, all_xmax, all_ymin, all_ymax = np.inf, -np.inf, np.inf, -np.inf
 
@@ -506,17 +345,8 @@ class AdvancedAnalysisCanvas:
         span_y = all_ymax - all_ymin if all_ymax != all_ymin else 1.0
 
         self.view_xmin, self.view_xmax = all_xmin - span_x * 0.05, all_xmax + span_x * 0.05
-        
-        if self.y_min_override is not None:
-            self.view_ymin = self.y_min_override
-        else:
-            self.view_ymin = all_ymin - span_y * 0.05
-            
-        if self.y_max_override is not None:
-            self.view_ymax = self.y_max_override
-        else:
-            self.view_ymax = all_ymax + span_y * 0.05
-            
+        self.view_ymin = self.y_min_override if self.y_min_override is not None else all_ymin - span_y * 0.05
+        self.view_ymax = self.y_max_override if self.y_max_override is not None else all_ymax + span_y * 0.05
         self.redraw()
 
     def _cx(self, x): return self.pad_l + (x - self.view_xmin) / (self.view_xmax - self.view_xmin) * self.cw
@@ -526,14 +356,10 @@ class AdvancedAnalysisCanvas:
 
     def execute_pan(self, direction, factor=0.08):
         span_x, span_y = self.view_xmax - self.view_xmin, self.view_ymax - self.view_ymin
-        if direction == 'left':
-            self.view_xmin -= span_x * factor; self.view_xmax -= span_x * factor
-        elif direction == 'right':
-            self.view_xmin += span_x * factor; self.view_xmax += span_x * factor
-        elif direction == 'up':
-            self.view_ymin += span_y * factor; self.view_ymax += span_y * factor
-        elif direction == 'down':
-            self.view_ymin -= span_y * factor; self.view_ymax -= span_y * factor
+        if direction == 'left': self.view_xmin -= span_x * factor; self.view_xmax -= span_x * factor
+        elif direction == 'right': self.view_xmin += span_x * factor; self.view_xmax += span_x * factor
+        elif direction == 'up': self.view_ymin += span_y * factor; self.view_ymax += span_y * factor
+        elif direction == 'down': self.view_ymin -= span_y * factor; self.view_ymax -= span_y * factor
         self.redraw()
 
     def _on_resize(self, e):
@@ -628,10 +454,8 @@ class AdvancedAnalysisCanvas:
             self.canvas.itemconfig(self.tt_txt, state='normal')
 
     def _on_mouse_leave(self, e):
-        self.canvas.itemconfig(self.vl, state='hidden')
-        self.canvas.itemconfig(self.hl, state='hidden')
-        self.canvas.itemconfig(self.tt_bg, state='hidden')
-        self.canvas.itemconfig(self.tt_txt, state='hidden')
+        self.canvas.itemconfig(self.vl, state='hidden'); self.canvas.itemconfig(self.hl, state='hidden')
+        self.canvas.itemconfig(self.tt_bg, state='hidden'); self.canvas.itemconfig(self.tt_txt, state='hidden')
 
     def redraw(self):
         self.canvas.delete('grid'); self.canvas.delete('trace')
@@ -639,21 +463,21 @@ class AdvancedAnalysisCanvas:
         self.canvas.config(bg=Theme.CV_BG, highlightbackground=Theme.BRD)
 
         if self.title:
-            self.canvas.create_text(self.pad_l - 10, 20, text=self.title, fill=Theme.ACC, font=('Segoe UI', 12, 'bold'), anchor='w', tags='grid')
+            self.canvas.create_text(self.pad_l - 10, 20, text=self.title, fill=Theme.ACC, font=('Segoe UI', 11, 'bold'), anchor='w', tags='grid')
         if self.x_label:
-            self.canvas.create_text(self.pad_l + self.cw/2, self.h - 15, text=self.x_label, fill=Theme.FG, font=('Segoe UI', 11, 'bold'), anchor='s', tags='grid')
+            self.canvas.create_text(self.pad_l + self.cw/2, self.h - 15, text=self.x_label, fill=Theme.FG, font=('Segoe UI', 10, 'bold'), anchor='s', tags='grid')
         if self.y_label:
-            self.canvas.create_text(20, self.pad_t + self.ch/2, text=self.y_label, fill=Theme.FG, font=('Segoe UI', 11, 'bold'), angle=90, anchor='s', tags='grid')
+            self.canvas.create_text(20, self.pad_t + self.ch/2, text=self.y_label, fill=Theme.FG, font=('Segoe UI', 10, 'bold'), angle=90, anchor='s', tags='grid')
 
         for k in range(self.num_grid + 1):
             frac = k / self.num_grid
             gx, gy = self.pad_l + self.cw * frac, self.pad_t + self.ch * frac
             
             self.canvas.create_line(self.pad_l, gy, self.w - self.pad_r, gy, fill=Theme.SEP, tags='grid')
-            self.canvas.create_text(self.pad_l - 8, gy, text=f"{self.view_ymax - (self.view_ymax - self.view_ymin) * frac:.3g}", anchor='e', font=('Segoe UI', 10), fill=Theme.DIM, tags='grid')
+            self.canvas.create_text(self.pad_l - 8, gy, text=f"{self.view_ymax - (self.view_ymax - self.view_ymin) * frac:.3g}", anchor='e', font=('Segoe UI', 9), fill=Theme.DIM, tags='grid')
 
             self.canvas.create_line(gx, self.pad_t, gx, self.h - self.pad_b, fill=Theme.SEP, tags='grid')
-            self.canvas.create_text(gx, self.h - self.pad_b + 8, text=f"{self.view_xmin + (self.view_xmax - self.view_xmin) * frac:.3g}", anchor='n', font=('Segoe UI', 10), fill=Theme.DIM, tags='grid')
+            self.canvas.create_text(gx, self.h - self.pad_b + 8, text=f"{self.view_xmin + (self.view_xmax - self.view_xmin) * frac:.3g}", anchor='n', font=('Segoe UI', 9), fill=Theme.DIM, tags='grid')
 
         dash_map = {"Solid": None, "Dashed": (8, 4), "Dotted": (2, 4)}
 
@@ -693,14 +517,14 @@ class AdvancedAnalysisCanvas:
                 style = dash_map.get(trace.get("style", "Solid"), None)
                 name = trace.get("trace_name")[:22] + "..." if len(trace.get("trace_name")) > 22 else trace.get("trace_name")
                 self.canvas.create_line(lx, ly + 10, lx + 30, ly + 10, fill=trace["color"], width=2, dash=style, tags='trace')
-                self.canvas.create_text(lx + 40, ly + 10, text=name, fill=Theme.FG, font=('Segoe UI', 10, 'bold'), anchor='w', tags='trace')
+                self.canvas.create_text(lx + 40, ly + 10, text=name, fill=Theme.FG, font=('Segoe UI', 9, 'bold'), anchor='w', tags='trace')
                 ly += 22
 
         for lbl in self.labels:
             lx, ly = self._cx(lbl["x"]), self._cy(lbl["y"])
             if self.pad_l <= lx <= self.w - self.pad_r and self.pad_t <= ly <= self.h - self.pad_b:
                 self.canvas.create_oval(lx-5, ly-5, lx+5, ly+5, fill='#10b981', outline='#ffffff', tags='trace')
-                self.canvas.create_text(lx+10, ly-10, text=lbl["text"], anchor='sw', font=('Segoe UI', 10, 'bold'), fill=Theme.FG, tags='trace')
+                self.canvas.create_text(lx+10, ly-10, text=lbl["text"], anchor='sw', font=('Segoe UI', 9, 'bold'), fill=Theme.FG, tags='trace')
 
         self._render_markers()
         if self.on_view_changed: self.on_view_changed()
@@ -722,25 +546,29 @@ class AdvancedAnalysisCanvas:
             mid_x, mid_y = (cx1 + cx2) / 2, min(cy1, cy2) - 20
             
             self.canvas.create_rectangle(mid_x-130, mid_y-12, mid_x+130, mid_y+12, fill='#1e293b', outline=Theme.C_MARK, tags='trace')
-            self.canvas.create_text(mid_x, mid_y, text=report, fill='#ffffff', font=('Segoe UI', 10, 'bold'), tags='trace')
+            self.canvas.create_text(mid_x, mid_y, text=report, fill='#ffffff', font=('Segoe UI', 9, 'bold'), tags='trace')
 
 # ------------------------------------------------------------------------
-# 7. Global State & App Shell (Master Controller)
+# 5. Global State & App Shell (Master Controller)
 # ------------------------------------------------------------------------
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Keysight B2910CL Master Controller & Analytics Dashboard")
+        self.root.title("Keysight B2910CL Precision Control & Analytics Dashboard")
         self.root.configure(bg=Theme.BG)
         self.root.geometry("1400x850")
-        self.root.minsize(1050, 600)
+        self.root.minsize(1200, 700)
+
+        self._build_top_menu()
 
         # SMU Hardware Variables
         self.rm = pyvisa.ResourceManager()
         self.smu = None
+        self.connected_port = None
         self.is_running = False
         self.data_queue = queue.Queue()
         self.is_first_chunk = True
+        self.custom_list_vals = []
 
         # Graphing Variables
         self.global_datasets = {}
@@ -750,121 +578,243 @@ class App:
         self.chart_configs = {}  
         self.view_mode = "OVERLAY"
         self._stats_timer = None  
+        
+        self.btn_layout_smu = None
+        self.btn_layout_ana = None
 
         self._build_ui_shell()
         self._rebuild_charts()
-        self._scan_visa()
+        
+        threading.Thread(target=self._visa_monitor_thread, daemon=True).start()
+
+    def _build_top_menu(self):
+        menubar = tk.Menu(self.root)
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Toggle Dark/Light Mode", command=self._toggle_dark_mode)
+        menubar.add_cascade(label="View", menu=view_menu)
+        self.root.config(menu=menubar)
 
     def _build_ui_shell(self):
         # -- TOP HEADER --
-        tb = tk.Frame(self.root, bg=Theme.PNL, height=45, relief='flat')
+        tb = tk.Frame(self.root, bg=Theme.PNL, height=50, relief='flat')
         tb.pack(fill='x', side='top')
         tk.Frame(self.root, bg=Theme.BRD, height=1).pack(fill='x', side='top')
         tb.pack_propagate(False)
 
         tk.Label(tb, text='B2910CL MASTER SYSTEM', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 13, 'bold')).pack(side='left', padx=15)
-        tk.Frame(tb, bg=Theme.BRD, width=1).pack(side='left', fill='y', pady=6)
-        
-        self.lbl_file_info = tk.Label(tb, text='Hardware Offline', bg=Theme.PNL, fg=Theme.ERR, font=('Segoe UI', 11, 'bold'))
-        self.lbl_file_info.pack(side='left', padx=15)
+        tk.Frame(tb, bg=Theme.BRD, width=1).pack(side='left', fill='y', pady=8)
+        self.lbl_status = tk.Label(tb, text='Hardware Offline', bg=Theme.PNL, fg=Theme.ERR, font=('Segoe UI', 11, 'bold'))
+        self.lbl_status.pack(side='left', padx=15)
 
         # -- MAIN BODY --
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # -- LEFT PANEL (Tabs for Setup vs Analytics) --
-        left = tk.Frame(body, bg=Theme.PNL, width=350, relief='flat')
+        # -- ENLARGED LEFT PANEL (Fixed Width: 420px) --
+        left = tk.Frame(body, bg=Theme.PNL, width=420, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
         tk.Frame(body, bg=Theme.BRD, width=1).pack(side='left', fill='y')
 
+        left_top = tk.Frame(left, bg=Theme.PNL)
+        left_top.pack(side='top', fill='both', expand=True)
+        
+        left_bottom = tk.Frame(left, bg=Theme.PNL)
+        left_bottom.pack(side='bottom', fill='x')
+
         style = ttk.Style()
         style.theme_use('default')
         style.configure('Left.TNotebook', background=Theme.PNL, borderwidth=0)
-        style.configure('Left.TNotebook.Tab', font=('Segoe UI', 11, 'bold'), padding=[12, 6], background=Theme.PNL2, foreground=Theme.DIM)
+        style.configure('Left.TNotebook.Tab', font=('Segoe UI', 10, 'bold'), padding=[12, 6], background=Theme.PNL2, foreground=Theme.DIM)
         style.map('Left.TNotebook.Tab', background=[('selected', Theme.PNL)], foreground=[('selected', Theme.ACC)])
 
-        nb_left = ttk.Notebook(left, style='Left.TNotebook')
+        nb_left = ttk.Notebook(left_top, style='Left.TNotebook')
         nb_left.pack(fill='both', expand=True)
 
-        tab_smu = tk.Frame(nb_left, bg=Theme.PNL)
+        # Tabs
+        tab_smu = VerticalScrollFrame(nb_left)
         tab_ana = tk.Frame(nb_left, bg=Theme.PNL)
+        tab_scpi = tk.Frame(nb_left, bg=Theme.PNL)
+        
         nb_left.add(tab_smu, text="🔌 SMU Setup")
         nb_left.add(tab_ana, text="📊 Analytics")
-
+        nb_left.add(tab_scpi, text="💻 SCPI Terminal")
+        
         def sec(parent, title):
             tk.Frame(parent, bg=Theme.SEP, height=1).pack(fill='x')
             f = tk.Frame(parent, bg=Theme.PNL)
-            f.pack(fill='x', padx=10, pady=8)
-            tk.Label(f, text=title, bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(2, 4))
+            f.pack(fill='x', padx=15, pady=8)
+            tk.Label(f, text=title, bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(2, 6))
             return f
 
         # ==========================================
         # TAB 1: SMU SETUP
         # ==========================================
-        conn_sec = sec(tab_smu, "HARDWARE CONNECTION")
+        smu_inner = tab_smu.inner
+        conn_sec = sec(smu_inner, "HARDWARE CONNECTION")
         self.visa_combo = ttk.Combobox(conn_sec, state='readonly', font=('Segoe UI', 10))
         self.visa_combo.pack(fill='x', pady=2)
         btn_frm = tk.Frame(conn_sec, bg=Theme.PNL)
         btn_frm.pack(fill='x', pady=4)
-        tk.Button(btn_frm, text="Scan USB", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 9, 'bold'), command=self._scan_visa).pack(side='left', fill='x', expand=True, padx=(0,2))
-        self.btn_conn = tk.Button(btn_frm, text="Connect", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 9, 'bold'), command=self._connect_smu)
-        self.btn_conn.pack(side='right', fill='x', expand=True, padx=(2,0))
+        tk.Button(btn_frm, text="Manual Scan", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 9, 'bold'), command=self._scan_visa).pack(side='left', fill='x', expand=True, padx=(0,4))
+        self.btn_conn = tk.Button(btn_frm, text="Connect Hardware", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 9, 'bold'), command=self._connect_smu)
+        self.btn_conn.pack(side='right', fill='x', expand=True, padx=(4,0))
 
-        cfg_sec = sec(tab_smu, "TEST CONFIGURATION")
+        cfg_sec = sec(smu_inner, "TEST CONFIGURATION")
         
-        def add_entry(parent, label, default):
-            tk.Label(parent, text=label, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-            e = tk.Entry(parent, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10))
-            e.insert(0, default)
-            e.pack(fill='x', pady=(0, 6))
-            return e
-
         self.src_mode_var = tk.StringVar(value="Current (A)")
         tk.Label(cfg_sec, text="Source Mode:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        ttk.Combobox(cfg_sec, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)", "DC Hold"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,6))
+        cb_src = ttk.Combobox(cfg_sec, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)"], state="readonly", font=('Segoe UI', 10))
+        cb_src.pack(fill='x', pady=(0,6))
+        
+        self.msr_mode_var = tk.StringVar(value="Auto (Opposite)")
+        tk.Label(cfg_sec, text="Primary Measurement Display:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
+        cb_msr = ttk.Combobox(cfg_sec, textvariable=self.msr_mode_var, values=["Auto (Opposite)", "Voltage (V)", "Current (A)", "Resistance (Ω)", "Power (W)"], state="readonly", font=('Segoe UI', 10))
+        cb_msr.pack(fill='x', pady=(0,6))
 
         self.shape_var = tk.StringVar(value="Square (Pulse)")
         tk.Label(cfg_sec, text="Waveform Shape:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        ttk.Combobox(cfg_sec, textvariable=self.shape_var, values=["Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "DC Hold"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,6))
+        cb_shape = ttk.Combobox(cfg_sec, textvariable=self.shape_var, values=["Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 10))
+        cb_shape.pack(fill='x', pady=(0,6))
+        
+        self.dynamic_params = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.dynamic_params.pack(fill='x', pady=(0,0))
+        
+        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_min.grid(row=0, column=0, sticky='w', pady=2)
+        self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_min.insert(0, "0.005")
+        self.ent_min.grid(row=0, column=1, sticky='e', pady=2)
 
-        self.ent_min = add_entry(cfg_sec, "Base/Min Level:", "0.005")
-        self.ent_max = add_entry(cfg_sec, "Peak/Max Level:", "0.040")
-        self.ent_cmp = add_entry(cfg_sec, "Compliance Limit:", "10.0")
-        self.ent_per = add_entry(cfg_sec, "Cycle Period (s):", "4.0")
-        self.ent_pts = add_entry(cfg_sec, "Points/Cycle (Res):", "200")
-        self.ent_tot = add_entry(cfg_sec, "Total Test Time (s):", "16.0")
+        self.lbl_max = tk.Label(self.dynamic_params, text="Peak/Max Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_max.grid(row=1, column=0, sticky='w', pady=2)
+        self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_max.insert(0, "0.040")
+        self.ent_max.grid(row=1, column=1, sticky='e', pady=2)
 
-        save_sec = sec(tab_smu, "LOGGING & CONTROL")
+        self.lbl_cmp = tk.Label(self.dynamic_params, text="Compliance Limit (V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=2)
+        self.ent_cmp = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_cmp.insert(0, "10.0")
+        self.ent_cmp.grid(row=2, column=1, sticky='e', pady=2)
+        
+        def _update_units(*args):
+            is_curr = "Current" in self.src_mode_var.get()
+            u_src = "A" if is_curr else "V"
+            u_cmp = "V" if is_curr else "A"
+            self.lbl_min.config(text=f"Base/Min Level ({u_src}):")
+            self.lbl_max.config(text=f"Peak/Max Level ({u_src}):")
+            self.lbl_cmp.config(text=f"Compliance Limit ({u_cmp}):")
+        self.src_mode_var.trace_add('write', _update_units)
+        
+        self.time_frame_std = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.time_frame_pls = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.time_frame_csv = tk.Frame(cfg_sec, bg=Theme.PNL)
+        
+        tk.Label(self.time_frame_std, text="Cycle Period (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
+        self.ent_per = tk.Entry(self.time_frame_std, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_per.insert(0, "4.0")
+        self.ent_per.grid(row=0, column=1, sticky='e', pady=2)
+        
+        self.pulse_base_var = tk.StringVar(value="2.0")
+        self.pulse_peak_var = tk.StringVar(value="2.0")
+        tk.Label(self.time_frame_pls, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
+        tk.Entry(self.time_frame_pls, textvariable=self.pulse_base_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=0, column=1, sticky='e', pady=2)
+        tk.Label(self.time_frame_pls, text="Time at Peak (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(self.time_frame_pls, textvariable=self.pulse_peak_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=1, column=1, sticky='e', pady=2)
+        
+        self.lbl_duty = tk.Label(self.time_frame_pls, text="Duty: 50.0% | Period: 4.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'))
+        self.lbl_duty.grid(row=2, column=0, columnspan=2, sticky='e', pady=2)
+        
+        def _update_duty(*args):
+            try:
+                b = float(self.pulse_base_var.get())
+                p = float(self.pulse_peak_var.get())
+                t = b + p
+                duty = (p / t) * 100 if t > 0 else 0
+                self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {t:.3f}s")
+            except: pass
+        self.pulse_base_var.trace_add('write', _update_duty)
+        self.pulse_peak_var.trace_add('write', _update_duty)
+        
+        tk.Button(self.time_frame_csv, text="Browse Custom CSV List...", bg=Theme.PNL2, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'), relief='flat', command=self._load_custom_csv).pack(fill='x', pady=2)
+        self.lbl_custom = tk.Label(self.time_frame_csv, text="No File Loaded.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9))
+        self.lbl_custom.pack(anchor='w')
+
+        self.bottom_params = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.bottom_params.pack(fill='x', pady=(0,0))
+        tk.Label(self.bottom_params, text="Points/Cycle (Res):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
+        self.ent_pts = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_pts.insert(0, "360")
+        self.ent_pts.grid(row=0, column=1, sticky='e', pady=2)
+        
+        tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
+        self.ent_tot = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        self.ent_tot.insert(0, "12.0")
+        self.ent_tot.grid(row=1, column=1, sticky='e', pady=2)
+
+        def _swap_ui(*args):
+            shape = self.shape_var.get()
+            self.time_frame_std.pack_forget()
+            self.time_frame_pls.pack_forget()
+            self.time_frame_csv.pack_forget()
+            if "Pulse" in shape: self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
+            elif "Custom" in shape: self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
+            else: self.time_frame_std.pack(fill='x', after=self.dynamic_params)
+        self.shape_var.trace_add('write', _swap_ui)
+        _swap_ui()
+
+        adv_sec = sec(smu_inner, "ADVANCED SETTINGS")
+        self.avg_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(adv_sec, text="Enable Hardware Averaging", variable=self.avg_var, bg=Theme.PNL, fg=Theme.FG, selectcolor=Theme.PNL2, font=('Segoe UI', 10)).pack(anchor='w', pady=(0,2))
+        self.wire_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(adv_sec, text="4-Wire Kelvin Sensing", variable=self.wire_var, bg=Theme.PNL, fg=Theme.FG, selectcolor=Theme.PNL2, font=('Segoe UI', 10)).pack(anchor='w', pady=(0,4))
+        
+        tk.Label(adv_sec, text="Aperture (Integration):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
+        self.aperture_var = tk.StringVar(value="Auto")
+        ttk.Combobox(adv_sec, textvariable=self.aperture_var, values=["Auto", "1e-5 (10 µs High-Speed)"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,4))
+
+        sys_sec_smu = sec(smu_inner, "VIEWPORT CONTROL")
+        self.btn_layout_smu = tk.Button(sys_sec_smu, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
+        self.btn_layout_smu.pack(fill='x', ipady=3, pady=2)
+        tk.Button(sys_sec_smu, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=3, pady=2)
+
+
+        # ==========================================
+        # FIXED BOTTOM ACTION PANEL 
+        # ==========================================
+        tk.Frame(left_bottom, bg=Theme.SEP, height=1).pack(fill='x')
+        action_frm = tk.Frame(left_bottom, bg=Theme.PNL)
+        action_frm.pack(fill='x', padx=15, pady=10)
+
         self.save_var = tk.StringVar(value=os.path.join(os.path.dirname(os.path.abspath(__file__)), "B2910CL_Live.csv"))
-        tk.Label(save_sec, text="Save File Path:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        sv_frm = tk.Frame(save_sec, bg=Theme.PNL)
-        sv_frm.pack(fill='x', pady=(0, 6))
-        tk.Entry(sv_frm, textvariable=self.save_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10)).pack(side='left', fill='x', expand=True)
-        tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 9)).pack(side='right', padx=(4,0))
+        tk.Label(action_frm, text="Save Data To:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
+        sv_frm = tk.Frame(action_frm, bg=Theme.PNL)
+        sv_frm.pack(fill='x', pady=(0, 4))
+        tk.Entry(sv_frm, textvariable=self.save_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9)).pack(side='left', fill='x', expand=True)
+        tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 9, 'bold')).pack(side='right', padx=(4,0))
 
-        self.hold_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(save_sec, text="Hold Base Output ON after test", variable=self.hold_var, bg=Theme.PNL, fg=Theme.FG, selectcolor=Theme.PNL2, font=('Segoe UI', 10)).pack(anchor='w', pady=(0,8))
+        tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
+        self.off_mode_var = tk.StringVar(value="Turn OFF (Normal)")
+        ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Base Level"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,6))
 
-        self.btn_start = tk.Button(save_sec, text="START TEST", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._start_test)
+        self.btn_start = tk.Button(action_frm, text="▶ START TEST", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._start_test)
         self.btn_start.pack(fill='x', ipady=6, pady=4)
         
-        self.btn_stop = tk.Button(save_sec, text="EMERGENCY STOP", bg="#dc2626", fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._stop_test)
-        self.btn_stop.pack(fill='x', ipady=6, pady=4)
+        self.btn_stop = tk.Button(action_frm, text="⏹ EMERGENCY STOP", bg="#dc2626", fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._stop_test)
+        self.btn_stop.pack(fill='x', ipady=6, pady=2)
 
         # ==========================================
-        # TAB 2: ANALYTICS (from combined.py)
+        # TAB 2: ANALYTICS 
         # ==========================================
         ds_sec = sec(tab_ana, "DATA SOURCE")
-        tk.Button(ds_sec, text='📂  Load Offline CSV', bg=Theme.PNL2, fg=Theme.ACC, relief='flat', bd=0, font=('Segoe UI', 11, 'bold'), cursor='hand2', command=self._browse_and_load_csv).pack(fill='x', ipady=4, pady=2)
-        
-        self.line_registry_box = tk.Listbox(ds_sec, height=5, bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 11), selectmode='single', highlightthickness=0, bd=0)
+        tk.Button(ds_sec, text='📂  Load Offline CSV', bg=Theme.PNL2, fg=Theme.ACC, relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._browse_and_load_csv).pack(fill='x', ipady=4, pady=2)
+        self.line_registry_box = tk.Listbox(ds_sec, height=5, bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 10), selectmode='single', highlightthickness=0, bd=0)
         self.line_registry_box.pack(fill='x', pady=4)
-        
         self.listbox_tooltip = ListboxTooltip(self.line_registry_box, lambda idx: self.global_datasets.get(self.registry_keys[idx]) if idx < len(self.registry_keys) else None)
         self.line_registry_box.bind('<<ListboxSelect>>', self._on_listbox_select)
         
-        self.context_menu = tk.Menu(self.root, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 11))
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
         self.context_menu.add_command(label="⚙ Re-configure CSV Map", command=self._reconfigure_selected_line)
         self.context_menu.add_command(label="👁 Toggle Visibility", command=self._toggle_visibility)
         self.context_menu.add_separator()
@@ -875,47 +825,53 @@ class App:
 
         btn_frm_a = tk.Frame(ds_sec, bg=Theme.PNL)
         btn_frm_a.pack(fill='x', pady=1)
-        tk.Button(btn_frm_a, text='👁 Toggle Visibility', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._toggle_visibility).pack(side='left', fill='x', expand=True, padx=(0, 2))
-        tk.Button(btn_frm_a, text='✕ Remove Selected Trace', bg='#fef2f2', fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._purge_selected_line).pack(side='right', fill='x', expand=True, padx=(2, 0))
+        tk.Button(btn_frm_a, text='👁 Toggle Vis', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._toggle_visibility).pack(side='left', fill='x', expand=True, padx=(0, 2))
+        tk.Button(btn_frm_a, text='✕ Remove', bg='#fef2f2', fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._purge_selected_line).pack(side='right', fill='x', expand=True, padx=(2, 0))
 
-        lay_sec = sec(tab_ana, "LAYOUT & COMPARISON")
-        self.btn_toggle_layout = tk.Button(lay_sec, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 11, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
-        self.btn_toggle_layout.pack(fill='x', ipady=4, pady=2)
+        lay_sec = sec(tab_ana, "LAYOUT & VIEWPORT")
+        self.btn_layout_ana = tk.Button(lay_sec, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
+        self.btn_layout_ana.pack(fill='x', ipady=4, pady=2)
+        tk.Button(lay_sec, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=4, pady=2)
 
         math_sec = sec(tab_ana, "CALCULUS TOOLS")
         self.math_target_var = tk.StringVar()
-        self.math_combo = ttk.Combobox(math_sec, textvariable=self.math_target_var, state='readonly', font=('Segoe UI', 11))
+        self.math_combo = ttk.Combobox(math_sec, textvariable=self.math_target_var, state='readonly', font=('Segoe UI', 10))
         self.math_combo.pack(fill='x', pady=4)
-
-        tk.Button(math_sec, text='⚡ Differentiation (Slope)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 11), cursor='hand2', command=self._run_derivative_pipeline).pack(fill='x', ipady=3, pady=2)
-        tk.Button(math_sec, text='∫ Integration (Area)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 11), cursor='hand2', command=self._run_integral_pipeline).pack(fill='x', ipady=3, pady=2)
+        tk.Button(math_sec, text='⚡ Differentiation (Slope)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 10), cursor='hand2', command=self._run_derivative_pipeline).pack(fill='x', ipady=3, pady=2)
+        tk.Button(math_sec, text='∫ Integration (Area)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 10), cursor='hand2', command=self._run_integral_pipeline).pack(fill='x', ipady=3, pady=2)
         tk.Button(math_sec, text='✕ Clear Math Traces', bg=Theme.PNL2, fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._clear_math_traces).pack(fill='x', pady=2)
 
-        mark_sec = sec(tab_ana, "VECTOR GEOMETRY MARKERS")
-        self.btn_toggle_marker = tk.Button(mark_sec, text='📍  Enable Point Markers', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 11), cursor='hand2', command=self._toggle_marker_mode)
-        self.btn_toggle_marker.pack(fill='x', ipady=3, pady=2)
-        tk.Button(mark_sec, text='🗑  Clear Vector Marks', bg=Theme.PNL2, fg=Theme.DIM, relief='flat', bd=0, font=('Segoe UI', 11), cursor='hand2', command=self._clear_canvas_markers).pack(fill='x', ipady=2, pady=2)
-
-        sys_sec = sec(tab_ana, "SYSTEM VIEWPORT")
-        tk.Button(sys_sec, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 11, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=4, pady=2)
-        tk.Button(sys_sec, text='🌙  Toggle Dark Mode', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 11, 'bold'), cursor='hand2', command=self._toggle_dark_mode).pack(fill='x', ipady=4, pady=2)
-
+        # ==========================================
+        # TAB 3: SCPI TERMINAL
+        # ==========================================
+        scpi_sec = sec(tab_scpi, "RAW HARDWARE COMMUNICATION")
+        tk.Label(scpi_sec, text="Send custom SCPI commands directly.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9)).pack(anchor='w', pady=(0,5))
+        
+        self.txt_term = tk.Text(scpi_sec, bg=Theme.PNL2, fg=Theme.FG, font=('Consolas', 10), height=18)
+        self.txt_term.pack(fill='x', pady=5)
+        
+        cmd_frm = tk.Frame(scpi_sec, bg=Theme.PNL)
+        cmd_frm.pack(fill='x', pady=5)
+        self.ent_cmd = tk.Entry(cmd_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Consolas', 11))
+        self.ent_cmd.pack(side='left', fill='x', expand=True)
+        self.ent_cmd.bind("<Return>", lambda e: self._send_scpi())
+        tk.Button(cmd_frm, text="SEND", bg=Theme.ACC, fg="#ffffff", relief='flat', font=('Segoe UI', 9, 'bold'), command=self._send_scpi).pack(side='right', padx=(5,0))
 
         # -- RIGHT PANEL (Graph) --
         right = tk.Frame(body, bg=Theme.BG)
-        right.pack(side='left', fill='both', expand=True, padx=12, pady=10)
+        right.pack(side='left', fill='both', expand=True, padx=15, pady=15)
 
         stats_frame = tk.Frame(right, bg=Theme.BG)
-        stats_frame.pack(fill='x', side='top', pady=(0, 6))
+        stats_frame.pack(fill='x', side='top', pady=(0, 8))
 
         self.metric_boxes = {}
         ordered_metrics = [('min', 'Min (Vis)'), ('max', 'Max (Vis)'), ('mean', 'Mean μ'), ('std', 'Std Dev σ'), ('count', 'Samples in View')]
         for m_key, label_text in ordered_metrics:
             cell = tk.Frame(stats_frame, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.SEP)
-            cell.pack(side='left', fill='x', expand=True, padx=2)
-            tk.Label(cell, text=label_text.upper(), bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9, 'bold')).pack(anchor='w', padx=8, pady=(4, 0))
-            val_lbl = tk.Label(cell, text='--', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 14, 'bold'))
-            val_lbl.pack(anchor='w', padx=8, pady=(0, 4))
+            cell.pack(side='left', fill='x', expand=True, padx=4)
+            tk.Label(cell, text=label_text.upper(), bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9, 'bold')).pack(anchor='w', padx=10, pady=(6, 0))
+            val_lbl = tk.Label(cell, text='--', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 13, 'bold'))
+            val_lbl.pack(anchor='w', padx=10, pady=(0, 6))
             self.metric_boxes[m_key] = val_lbl
 
         nb = ttk.Notebook(right, style='Sim.TNotebook')
@@ -925,26 +881,75 @@ class App:
         nb.add(chart_tab_panel, text='📈  High-Definition Interactive Viewports')
 
         self.chart_container = tk.Frame(chart_tab_panel, bg=Theme.BG)
-        self.chart_container.pack(fill='both', expand=True, padx=4, pady=4)
+        self.chart_container.pack(fill='both', expand=True, padx=6, pady=6)
+
 
     # ------------------------------------------------------------------
     # Hardware SMU Control Functions
     # ------------------------------------------------------------------
+    def _visa_monitor_thread(self):
+        while True:
+            try:
+                ports = self.rm.list_resources()
+                self.root.after(0, self._update_ports_gui, ports)
+            except: pass
+            time.sleep(2)
+
+    def _update_ports_gui(self, ports):
+        self.visa_combo['values'] = ports
+        if self.connected_port:
+            if self.connected_port not in ports:
+                self.lbl_status.config(text="Hardware Offline (Disconnected!)", fg=Theme.ERR)
+                self.smu = None
+            else:
+                self.lbl_status.config(text=f"Online: {self.connected_port}", fg="#10b981")
+
     def _scan_visa(self):
         ports = self.rm.list_resources()
         self.visa_combo['values'] = ports
-        if ports:
-            self.visa_combo.set(ports[0])
+        if ports: self.visa_combo.set(ports[0])
 
     def _connect_smu(self):
+        port = self.visa_combo.get()
+        if not port: return
         try:
-            self.smu = self.rm.open_resource(self.visa_combo.get())
+            self.smu = self.rm.open_resource(port)
             self.smu.timeout = 10000
             idn = self.smu.query("*IDN?").strip()
-            self.lbl_file_info.config(text=f"Online: {idn.split(',')[1]}", fg="#10b981")
-            self.btn_conn.config(state="disabled")
+            self.connected_port = port
+            self.lbl_status.config(text=f"Online: {idn.split(',')[1]}", fg="#10b981")
         except Exception as e:
             messagebox.showerror("Connection Error", str(e))
+
+    def _send_scpi(self):
+        if not self.smu:
+            messagebox.showerror("Offline", "Please connect to the instrument first.")
+            return
+        cmd = self.ent_cmd.get().strip()
+        if not cmd: return
+        self.ent_cmd.delete(0, tk.END)
+        self.txt_term.insert(tk.END, f"\n> {cmd}\n")
+        try:
+            if '?' in cmd:
+                resp = self.smu.query(cmd)
+                self.txt_term.insert(tk.END, f"{resp}\n")
+            else:
+                self.smu.write(cmd)
+        except Exception as e:
+            self.txt_term.insert(tk.END, f"ERROR: {str(e)}\n")
+        self.txt_term.see(tk.END)
+
+    def _load_custom_csv(self):
+        path = filedialog.askopenfilename(filetypes=[("CSV Data", "*.csv")])
+        if not path: return
+        try:
+            df = pd.read_csv(path, header=None)
+            self.custom_list_vals = df.iloc[:, 0].dropna().tolist()
+            self.lbl_custom.config(text=f"Loaded: {len(self.custom_list_vals)} points", fg=Theme.ACC)
+            self.ent_pts.delete(0, tk.END)
+            self.ent_pts.insert(0, str(len(self.custom_list_vals)))
+        except Exception as e:
+            messagebox.showerror("File Error", str(e))
 
     def _browse_save(self):
         path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
@@ -955,7 +960,7 @@ class App:
         if self.smu:
             try:
                 self.smu.write(":OUTP OFF")
-                self.lbl_file_info.config(text="Hardware KILLED (Output OFF)", fg=Theme.C_HL)
+                self.lbl_status.config(text="Hardware KILLED (Output OFF)", fg=Theme.ERR)
             except: pass
 
     def _start_test(self):
@@ -966,9 +971,10 @@ class App:
         self.is_running = True
         self.btn_start.config(state="disabled", text="TEST RUNNING...")
         
-        # Setup Live Traces
         src_label = f"Sourced ({self.src_mode_var.get()})"
-        msr_label = f"Measured ({'Voltage (V)' if 'Current' in self.src_mode_var.get() else 'Current (A)'})"
+        msr_label = f"Measured ({self.msr_mode_var.get()})"
+        if "Auto" in msr_label:
+            msr_label = "Measured (Voltage (V))" if "Current" in self.src_mode_var.get() else "Measured (Current (A))"
         
         self.global_datasets["Live_Source"] = {
             "x": np.array([], dtype=float), "y": np.array([], dtype=float), 
@@ -998,38 +1004,53 @@ class App:
             base = float(self.ent_min.get())
             peak = float(self.ent_max.get())
             comp = float(self.ent_cmp.get())
-            period = float(self.ent_per.get())
             pts = int(self.ent_pts.get())
             total_time = float(self.ent_tot.get())
             shape = self.shape_var.get()
-            hold_end = self.hold_var.get()
+            off_mode = self.off_mode_var.get()
             
+            if "Pulse" in shape:
+                t_base = float(self.pulse_base_var.get())
+                t_peak = float(self.pulse_peak_var.get())
+                period = t_base + t_peak
+            else:
+                period = float(self.ent_per.get())
+                
             step_time = period / pts
             amp, off = (peak - base) / 2.0, (peak + base) / 2.0
             list_vals = []
             
-            for tick in range(pts):
-                t = tick * step_time
-                if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
-                elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
-                elif "Pulse" in shape: 
-                    # Fixed: 25% Base -> 50% Peak -> 25% Base (Perfectly enclosed square pulse)
-                    val = base if (tick < pts*0.25 or tick >= pts*0.75) else peak
-                elif "Triangle" in shape:
-                    if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
-                    else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
-                elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
-                else: val = base
+            if "Custom" in shape:
+                if not self.custom_list_vals: raise ValueError("No Custom CSV loaded!")
+                list_vals = self.custom_list_vals
+            else:
+                for tick in range(pts):
+                    t = tick * step_time
+                    if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
+                    elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
+                    elif "Pulse" in shape: val = base if t < t_base else peak
+                    elif "Triangle" in shape:
+                        if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
+                        else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
+                    elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
+                    else: val = base
 
-                list_vals.append(round(val, 6))
+                    list_vals.append(round(val, 6))
 
             self.smu.write("*RST")
             self.smu.write("*CLS")
+            
+            self.smu.write(f":SENS:REMO {'ON' if self.wire_var.get() else 'OFF'}")
+            if self.avg_var.get(): self.smu.write(":SENS:AVER:STAT ON")
             
             src_str = "CURR" if mode_curr else "VOLT"
             msr_str = "VOLT" if mode_curr else "CURR"
             
             self.smu.write(f":SOUR:FUNC:MODE {src_str}")
+            
+            # CRITICAL ZERO-GLITCH FIX: Rest hardware safely at the exact base limit before sweep begins
+            self.smu.write(f":SOUR:{src_str} {base}") 
+            
             self.smu.write(f":SOUR:{src_str}:MODE LIST")
             self.smu.write(f":SOUR:{src_str}:RANG {max(abs(base), abs(peak))}")
             self.smu.write(f":SOUR:LIST:{src_str} {','.join(map(str, list_vals))}")
@@ -1037,8 +1058,7 @@ class App:
             self.smu.write(":SENS:FUNC \"VOLT\",\"CURR\"")
             self.smu.write(f":SENS:{msr_str}:PROT {comp}")
             
-            # Safe Aperture
-            ap_val = step_time * 0.5
+            ap_val = step_time * 0.5 if self.aperture_var.get() == "Auto" else 1e-5
             self.smu.write(f":SENS:VOLT:APER {ap_val}")
             self.smu.write(f":SENS:CURR:APER {ap_val}")
 
@@ -1055,7 +1075,7 @@ class App:
 
             save_file = self.save_var.get()
             with open(save_file, 'w', newline='') as f:
-                csv.writer(f).writerow(["Time (s)", f"Sourced ({src_str})", f"Measured ({msr_str})"])
+                csv.writer(f).writerow(["Time (s)", f"Sourced ({src_str})", "Voltage (V)", "Current (A)"])
 
             self.smu.write(":OUTP ON")
             global_t = 0.0
@@ -1079,22 +1099,30 @@ class App:
                 
                 t_rel = [x + global_t for x in t]
                 src_data = c if mode_curr else v
-                msr_data = v if mode_curr else c
                 
                 with open(save_file, 'a', newline='') as f:
                     writer = csv.writer(f)
-                    for tt, ss, mm in zip(t_rel, src_data, msr_data):
-                        writer.writerow([tt, ss, mm])
+                    for tt, ss, vv, cc in zip(t_rel, src_data, v, c):
+                        writer.writerow([tt, ss, vv, cc])
                 
-                self.data_queue.put((t_rel, src_data, msr_data))
+                self.data_queue.put((t_rel, src_data, v, c))
                 global_t += (t_count * step_time)
 
-            # Hold base or turn off
-            if hold_end and self.is_running:
-                self.smu.write(f":SOUR:{src_str}:MODE FIX")
-                self.smu.write(f":SOUR:{src_str} {base}")
-            else:
-                self.smu.write(":OUTP OFF")
+            # GRACEFUL EXIT (Advanced Off State with Zero Glitch Protection)
+            if self.is_running:
+                if off_mode == "Hold Base Level":
+                    self.smu.write(f":SOUR:{src_str}:MODE FIX")
+                    self.smu.write(f":SOUR:{src_str} {base}")
+                elif off_mode == "Turn OFF (High-Z)":
+                    self.smu.write(f":SOUR:{src_str}:MODE FIX")
+                    self.smu.write(f":SOUR:{src_str} {base}")
+                    self.smu.write(":OUTP:OFF:MODE HIZ")
+                    self.smu.write(":OUTP OFF")
+                else:
+                    self.smu.write(f":SOUR:{src_str}:MODE FIX")
+                    self.smu.write(f":SOUR:{src_str} {base}")
+                    self.smu.write(":OUTP:OFF:MODE NORM")
+                    self.smu.write(":OUTP OFF")
             
         except Exception as e:
             self.data_queue.put(Exception(str(e)))
@@ -1109,7 +1137,23 @@ class App:
                     messagebox.showerror("Hardware Error", str(data))
                     break
                 
-                t, src, msr = data
+                t, src, v, c = data
+                
+                # Dynamic Measurement Computation
+                msr_sel = self.msr_mode_var.get()
+                v_arr = np.array(v)
+                c_arr = np.array(c)
+                
+                if "Voltage" in msr_sel: msr = v_arr
+                elif "Current" in msr_sel: msr = c_arr
+                elif "Power" in msr_sel: msr = v_arr * c_arr
+                elif "Resistance" in msr_sel: 
+                    # Prevent division by zero
+                    c_safe = np.where(c_arr == 0, 1e-12, c_arr)
+                    msr = v_arr / c_safe
+                else: # Auto (Opposite)
+                    msr = v_arr if "Current" in self.src_mode_var.get() else c_arr
+                
                 ls = self.global_datasets["Live_Source"]
                 lm = self.global_datasets["Live_Measure"]
                 
@@ -1125,7 +1169,6 @@ class App:
                     if self.is_first_chunk:
                         chart.reset_global_viewport()
                     else:
-                        # Auto-Scroll the view to keep up with the new data
                         span = chart.view_xmax - chart.view_xmin
                         chart.view_xmax = max(chart.view_xmax, t[-1] + span*0.05)
                         chart.redraw()
@@ -1139,8 +1182,7 @@ class App:
         if self.is_running:
             self.root.after(30, self._gui_queue_processor)
         else:
-            self.btn_start.config(state="normal", text="START TEST")
-            self.lbl_file_info.config(text="Test Complete.", fg="#10b981")
+            self.btn_start.config(state="normal", text="▶ START TEST")
 
     # ------------------------------------------------------------------
     # Theme & Analytics Methods (From combined.py template)
@@ -1194,9 +1236,6 @@ class App:
         if sel:
             d_id = self.registry_keys[sel[0]]
             ds = self.global_datasets.get(d_id)
-            if ds:
-                state = "VISIBLE" if ds.get("visible", True) else "HIDDEN"
-                self.lbl_file_info.config(text=f"Selected: {ds['trace_name']} [{state}]")
 
     def _show_listbox_context_menu(self, event):
         try:
@@ -1391,18 +1430,26 @@ class App:
         
         if self.view_mode == "OVERLAY":
             self.view_mode = "GRID"
-            self.btn_toggle_layout.config(text="⬒  Merge to Overlay")
+            txt = "⬒  Merge to Overlay"
         else:
             self.view_mode = "OVERLAY"
-            self.btn_toggle_layout.config(text="🗖  Split to Grid View")
+            txt = "🗖  Split to Grid View"
+            
+        if hasattr(self, 'btn_layout_ana'): self.btn_layout_ana.config(text=txt)
+        if hasattr(self, 'btn_layout_smu'): self.btn_layout_smu.config(text=txt)
+        
         self._rebuild_charts()
 
     def _update_layout_button_state(self):
         vis_count = sum(1 for v in self.global_datasets.values() if v.get("visible", True))
-        if vis_count > 1: self.btn_toggle_layout.config(state='normal')
+        if vis_count > 1: 
+            if hasattr(self, 'btn_layout_ana'): self.btn_layout_ana.config(state='normal')
+            if hasattr(self, 'btn_layout_smu'): self.btn_layout_smu.config(state='normal')
         else:
             self.view_mode = "OVERLAY"
-            self.btn_toggle_layout.config(text="🗖  Split to Grid View", state='disabled')
+            txt = "🗖  Split to Grid View"
+            if hasattr(self, 'btn_layout_ana'): self.btn_layout_ana.config(text=txt, state='disabled')
+            if hasattr(self, 'btn_layout_smu'): self.btn_layout_smu.config(text=txt, state='disabled')
 
     def _run_derivative_pipeline(self):
         idx = self.math_combo.current()
@@ -1428,32 +1475,6 @@ class App:
 
     def _reset_chart_bounds(self):
         for chart in self.charts: chart.reset_global_viewport()
-
-    def _toggle_marker_mode(self):
-        if not self.charts: return
-        new_mode = not self.charts[0].marker_mode
-        for chart in self.charts: chart.marker_mode = new_mode
-            
-        if new_mode: self.btn_toggle_marker.config(text="🔒 Markers Active (Click 2x)", bg=Theme.C_MARK, fg=Theme.PNL)
-        else: self.btn_toggle_marker.config(text="📍  Enable Point Markers", bg=Theme.PNL2, fg=Theme.FG)
-
-    def _clear_canvas_markers(self):
-        for chart in self.charts:
-            chart.m1 = chart.m2 = None
-            chart.redraw()
-
-    def _arm_label_placement_mode(self):
-        label_text = self.txt_label_input.get().strip()
-        if not label_text: return
-        for chart in self.charts:
-            chart.next_label_text = label_text
-            chart.label_drop_mode = True
-            chart.canvas.config(cursor="crosshair")
-
-    def _clear_text_pins(self):
-        for chart in self.charts:
-            chart.labels.clear()
-            chart.redraw()
 
     def _reprocess_visible_window_metrics(self):
         if self._stats_timer: self.root.after_cancel(self._stats_timer)
@@ -1485,12 +1506,7 @@ class App:
 # Startup Context
 # ------------------------------------------------------------------------
 if __name__ == '__main__':
+    set_hd_resolution()
     root = tk.Tk()
-    try:
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-    
     app = App(root)
     root.mainloop()
