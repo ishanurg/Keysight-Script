@@ -112,6 +112,7 @@ class ChartPropertiesDialog(tk.Toplevel):
         self.chart_key = chart_key
         self.callback = callback
         self.trace_entries = {}
+
         self._build_ui()
 
     def _build_ui(self):
@@ -585,6 +586,7 @@ class App:
         self._build_ui_shell()
         self._rebuild_charts()
         
+        # Start Background Visa Scanner
         threading.Thread(target=self._visa_monitor_thread, daemon=True).start()
 
     def _build_top_menu(self):
@@ -610,7 +612,7 @@ class App:
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # -- ENLARGED LEFT PANEL (Fixed Width: 420px) --
+        # -- LEFT PANEL (Fixed Width: 420px) --
         left = tk.Frame(body, bg=Theme.PNL, width=420, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
@@ -795,14 +797,17 @@ class App:
         tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 9, 'bold')).pack(side='right', padx=(4,0))
 
         tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
-        self.off_mode_var = tk.StringVar(value="Turn OFF (Normal)")
-        ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Base Level"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,6))
+        self.off_mode_var = tk.StringVar(value="Hold Last Level")
+        ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Last Level"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,8))
 
-        self.btn_start = tk.Button(action_frm, text="▶ START TEST", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._start_test)
-        self.btn_start.pack(fill='x', ipady=6, pady=4)
+        ctrl_btn_frm = tk.Frame(action_frm, bg=Theme.PNL)
+        ctrl_btn_frm.pack(fill='x', pady=4)
         
-        self.btn_stop = tk.Button(action_frm, text="⏹ EMERGENCY STOP", bg="#dc2626", fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._stop_test)
-        self.btn_stop.pack(fill='x', ipady=6, pady=2)
+        self.btn_start = tk.Button(ctrl_btn_frm, text="▶ START TEST", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._start_test)
+        self.btn_start.pack(side='left', fill='x', expand=True, ipady=6, padx=(0, 4))
+        
+        self.btn_stop = tk.Button(ctrl_btn_frm, text="⏹ STOP / KILL", bg=Theme.ERR, fg="#ffffff", font=('Segoe UI', 12, 'bold'), relief='flat', command=self._stop_test)
+        self.btn_stop.pack(side='right', fill='x', expand=True, ipady=6, padx=(4, 0))
 
         # ==========================================
         # TAB 2: ANALYTICS 
@@ -839,7 +844,7 @@ class App:
         self.math_combo.pack(fill='x', pady=4)
         tk.Button(math_sec, text='⚡ Differentiation (Slope)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 10), cursor='hand2', command=self._run_derivative_pipeline).pack(fill='x', ipady=3, pady=2)
         tk.Button(math_sec, text='∫ Integration (Area)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 10), cursor='hand2', command=self._run_integral_pipeline).pack(fill='x', ipady=3, pady=2)
-        tk.Button(math_sec, text='✕ Clear Math Traces', bg=Theme.PNL2, fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._clear_math_traces).pack(fill='x', pady=2)
+        tk.Button(math_sec, text='✕ Clear Math Traces', bg=Theme.PNL2, fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._clear_math_traces).pack(fill='x', pady=4)
 
         # ==========================================
         # TAB 3: SCPI TERMINAL
@@ -1037,6 +1042,10 @@ class App:
 
                     list_vals.append(round(val, 6))
 
+            # EXTRACT EXACT START AND END TO PREVENT ZERO-SPIKE GLITCH
+            initial_val = list_vals[0] if list_vals else base
+            final_val = list_vals[-1] if list_vals else base
+
             self.smu.write("*RST")
             self.smu.write("*CLS")
             
@@ -1048,8 +1057,8 @@ class App:
             
             self.smu.write(f":SOUR:FUNC:MODE {src_str}")
             
-            # CRITICAL ZERO-GLITCH FIX: Rest hardware safely at the exact base limit before sweep begins
-            self.smu.write(f":SOUR:{src_str} {base}") 
+            # CRITICAL ZERO-GLITCH FIX: Bias the hardware to the exact first point of the wave BEFORE output turns on
+            self.smu.write(f":SOUR:{src_str} {initial_val}") 
             
             self.smu.write(f":SOUR:{src_str}:MODE LIST")
             self.smu.write(f":SOUR:{src_str}:RANG {max(abs(base), abs(peak))}")
@@ -1110,17 +1119,17 @@ class App:
 
             # GRACEFUL EXIT (Advanced Off State with Zero Glitch Protection)
             if self.is_running:
-                if off_mode == "Hold Base Level":
+                if off_mode == "Hold Last Level":
                     self.smu.write(f":SOUR:{src_str}:MODE FIX")
-                    self.smu.write(f":SOUR:{src_str} {base}")
+                    self.smu.write(f":SOUR:{src_str} {final_val}") # Safely rest exactly where the wave finished
                 elif off_mode == "Turn OFF (High-Z)":
                     self.smu.write(f":SOUR:{src_str}:MODE FIX")
-                    self.smu.write(f":SOUR:{src_str} {base}")
+                    self.smu.write(f":SOUR:{src_str} {final_val}")
                     self.smu.write(":OUTP:OFF:MODE HIZ")
                     self.smu.write(":OUTP OFF")
                 else:
                     self.smu.write(f":SOUR:{src_str}:MODE FIX")
-                    self.smu.write(f":SOUR:{src_str} {base}")
+                    self.smu.write(f":SOUR:{src_str} {final_val}")
                     self.smu.write(":OUTP:OFF:MODE NORM")
                     self.smu.write(":OUTP OFF")
             
@@ -1139,7 +1148,6 @@ class App:
                 
                 t, src, v, c = data
                 
-                # Dynamic Measurement Computation
                 msr_sel = self.msr_mode_var.get()
                 v_arr = np.array(v)
                 c_arr = np.array(c)
@@ -1148,10 +1156,9 @@ class App:
                 elif "Current" in msr_sel: msr = c_arr
                 elif "Power" in msr_sel: msr = v_arr * c_arr
                 elif "Resistance" in msr_sel: 
-                    # Prevent division by zero
                     c_safe = np.where(c_arr == 0, 1e-12, c_arr)
                     msr = v_arr / c_safe
-                else: # Auto (Opposite)
+                else:
                     msr = v_arr if "Current" in self.src_mode_var.get() else c_arr
                 
                 ls = self.global_datasets["Live_Source"]
