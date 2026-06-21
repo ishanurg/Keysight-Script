@@ -1,349 +1,508 @@
-import customtkinter as ctk
+import sys
+import os
+import ctypes
+from ctypes import wintypes
 import tkinter as tk
-from tkinter import filedialog, messagebox
-import pyvisa
+from tkinter import ttk, messagebox, filedialog
 import threading
+import time
 import math
 import csv
-import pandas as pd
+import pyvisa
+import queue
 import numpy as np
+import pandas as pd
 
-# Matplotlib for embedded graphing
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+# PyQtGraph with OpenGL Hardware Acceleration
+import pyqtgraph as pg
+from PyQt5 import QtWidgets, QtCore
 
-# Set modern theme
-ctk.set_appearance_mode("Dark")  
-ctk.set_default_color_theme("blue")  
+pg.setConfigOptions(useOpenGL=True, antialias=True)
 
-class B2910CL_ControllerApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.title("Keysight B2910CL Master Controller")
-        self.geometry("1200x800")
+# ==============================================================================
+# 1. UI THEME ARCHITECTURE
+# ==============================================================================
+class Theme:
+    BG    = '#0f172a'
+    PNL   = '#1e293b'
+    PNL2  = '#334155'
+    ACC   = '#3b82f6'
+    ACC_H = '#2563eb'
+    ERR   = '#ef4444'
+    FG    = '#f8fafc'
+    DIM   = '#94a3b8'
+
+def set_hd_resolution():
+    """Forces Windows to render Tkinter in crisp High-DPI."""
+    if sys.platform == 'win32':
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+
+# ==============================================================================
+# 2. MAIN APPLICATION CLASS
+# ==============================================================================
+class B2910CL_MasterApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Keysight B2910CL HD Master Controller")
+        self.root.geometry("1400x850")
+        self.root.configure(bg=Theme.BG)
+        
         self.rm = pyvisa.ResourceManager()
         self.smu = None
         self.is_running = False
+        self.data_queue = queue.Queue()
 
-        # Build the UI
-        self.build_ui()
-        self.scan_visa_resources()
+        self.apply_styles()
+        self.build_gui()
+        self.scan_ports()
 
-    def build_ui(self):
-        # Configure grid layout (1 column for sidebar, 1 for main content)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-
-        # ==========================================
-        # LEFT SIDEBAR: Connection & Status
-        # ==========================================
-        self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(8, weight=1)
-
-        ctk.CTkLabel(self.sidebar, text="Connection Setup", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, padx=20, pady=(20, 10))
+    def apply_styles(self):
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TFrame', background=Theme.BG)
+        style.configure('Panel.TFrame', background=Theme.PNL)
+        style.configure('TLabel', background=Theme.PNL, foreground=Theme.FG, font=('Segoe UI', 11))
+        style.configure('Header.TLabel', font=('Segoe UI', 14, 'bold'))
         
-        self.visa_dropdown = ctk.CTkComboBox(self.sidebar, values=["Scanning..."])
-        self.visa_dropdown.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
+        style.configure('TNotebook', background=Theme.BG, borderwidth=0)
+        style.configure('TNotebook.Tab', background=Theme.PNL2, foreground=Theme.FG, 
+                        padding=[20, 10], font=('Segoe UI', 11, 'bold'))
+        style.map('TNotebook.Tab', background=[('selected', Theme.ACC)])
         
-        self.btn_rescan = ctk.CTkButton(self.sidebar, text="Rescan USB Ports", command=self.scan_visa_resources)
-        self.btn_rescan.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
+        style.configure('TButton', background=Theme.PNL2, foreground=Theme.FG, font=('Segoe UI', 11, 'bold'))
+        style.map('TButton', background=[('active', Theme.ACC)])
+        style.configure('Action.TButton', background=Theme.ACC, padding=10)
 
-        self.btn_connect = ctk.CTkButton(self.sidebar, text="Connect to SMU", command=self.connect_instrument, fg_color="green")
-        self.btn_connect.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+    def build_gui(self):
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
 
-        self.lbl_status = ctk.CTkLabel(self.sidebar, text="Status: Disconnected", text_color="red")
-        self.lbl_status.grid(row=4, column=0, padx=20, pady=10)
+        # --- LEFT SIDEBAR (Connection & Execution) ---
+        sidebar = ttk.Frame(self.root, style='Panel.TFrame', padding=20)
+        sidebar.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # Run/Stop Controls
-        ctk.CTkLabel(self.sidebar, text="Execution", font=ctk.CTkFont(size=20, weight="bold")).grid(row=5, column=0, padx=20, pady=(40, 10))
+        ttk.Label(sidebar, text="HARDWARE SETUP", style='Header.TLabel').pack(anchor="w", pady=(0, 10))
+        self.visa_combo = ttk.Combobox(sidebar, width=30, font=('Segoe UI', 10))
+        self.visa_combo.pack(fill="x", pady=5)
         
-        self.btn_run = ctk.CTkButton(self.sidebar, text="START TEST", command=self.start_test_thread, height=50, font=ctk.CTkFont(size=18, weight="bold"))
-        self.btn_run.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
-        
-        self.btn_stop = ctk.CTkButton(self.sidebar, text="EMERGENCY STOP", command=self.emergency_stop, fg_color="red", hover_color="darkred", height=50, font=ctk.CTkFont(size=18, weight="bold"))
-        self.btn_stop.grid(row=7, column=0, padx=20, pady=10, sticky="ew")
+        btn_frame = ttk.Frame(sidebar, style='Panel.TFrame')
+        btn_frame.pack(fill="x", pady=10)
+        ttk.Button(btn_frame, text="Scan USB", command=self.scan_ports).pack(side="left", expand=True, fill="x", padx=(0,5))
+        self.btn_conn = ttk.Button(btn_frame, text="Connect", command=self.connect_smu)
+        self.btn_conn.pack(side="left", expand=True, fill="x", padx=(5,0))
 
-        # ==========================================
-        # RIGHT PANEL: Tabs
-        # ==========================================
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
-        
-        self.tab_config = self.tabview.add("Test Configuration")
-        self.tab_live   = self.tabview.add("Live Results Plot")
-        self.tab_viewer = self.tabview.add("CSV Data Viewer")
+        self.lbl_status = ttk.Label(sidebar, text="Status: Offline", foreground=Theme.ERR)
+        self.lbl_status.pack(anchor="w", pady=10)
+
+        ttk.Label(sidebar, text="EXECUTION ENGINE", style='Header.TLabel').pack(anchor="w", pady=(40, 10))
+        self.btn_start = ttk.Button(sidebar, text="START TEST", style='Action.TButton', command=self.start_test)
+        self.btn_start.pack(fill="x", pady=10)
+        self.btn_stop = ttk.Button(sidebar, text="EMERGENCY STOP", command=self.stop_test)
+        self.btn_stop.pack(fill="x", pady=5)
+
+        # --- RIGHT PANEL (Tabs) ---
+        self.tabs = ttk.Notebook(self.root)
+        self.tabs.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+
+        self.tab_config = ttk.Frame(self.tabs, style='Panel.TFrame')
+        self.tab_live = ttk.Frame(self.tabs, style='Panel.TFrame')
+        self.tab_viewer = ttk.Frame(self.tabs, style='Panel.TFrame')
+
+        self.tabs.add(self.tab_config, text="⚙️ Test Configuration")
+        self.tabs.add(self.tab_live, text="📈 Live Hardware Plot")
+        self.tabs.add(self.tab_viewer, text="📂 Offline CSV Viewer")
 
         self.build_config_tab()
-        self.build_plot_tab(self.tab_live, live=True)
-        self.build_viewer_tab()
+        self.build_plot_tabs()
+
+    def browse_save_location(self):
+        """Opens a file dialog to choose where the CSV will be saved."""
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Data Files", "*.csv"), ("All Files", "*.*")],
+            title="Choose Save Location",
+            initialfile="B2910CL_Data.csv"
+        )
+        if path:  # If the user didn't click Cancel
+            self.save_var.set(path)
 
     def build_config_tab(self):
-        # Waveform Selection
-        frame_wave = ctk.CTkFrame(self.tab_config)
-        frame_wave.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(frame_wave, text="1. Select Waveform Shape", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        grid_frame = ttk.Frame(self.tab_config, style='Panel.TFrame', padding=30)
+        grid_frame.pack(fill="both", expand=True)
+
+        # Variables
+        self.src_mode_var = tk.StringVar(value="Current (A)")
+        self.shape_var    = tk.StringVar(value="Sine Wave")
+        self.min_val_var  = tk.StringVar(value="0.005")
+        self.max_val_var  = tk.StringVar(value="0.040")
+        self.comp_var     = tk.StringVar(value="10.0")
         
-        self.wave_var = ctk.StringVar(value="Sine Wave")
-        waves = ["Sine Wave", "Cosine Wave", "Square Wave (Pulse)", "Staircase Sweep", "DC Hold"]
-        self.wave_dropdown = ctk.CTkComboBox(frame_wave, values=waves, variable=self.wave_var, width=300)
-        self.wave_dropdown.pack(anchor="w", padx=10, pady=5)
+        self.period_var   = tk.StringVar(value="4.0")
+        self.points_var   = tk.StringVar(value="360")
+        self.total_t_var  = tk.StringVar(value="12.0")
+        
+        self.aperture_var = tk.StringVar(value="Auto")
+        self.wire_var     = tk.BooleanVar(value=False)
+        
+        # Default save path inside the running folder
+        default_save = os.path.join(os.path.dirname(os.path.abspath(__file__)), "B2910CL_Data.csv")
+        self.save_var = tk.StringVar(value=default_save)
 
-        # Parameters Input Grid
-        frame_params = ctk.CTkFrame(self.tab_config)
-        frame_params.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(frame_params, text="2. Electrical Parameters", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=5)
+        # File browse frame setup
+        save_frame = ttk.Frame(grid_frame, style='Panel.TFrame')
+        ttk.Entry(save_frame, textvariable=self.save_var, width=50).pack(side="left", fill="x", expand=True)
+        ttk.Button(save_frame, text="Browse...", command=self.browse_save_location, width=10).pack(side="left", padx=(10, 0))
 
-        self.inputs = {}
+        # Layout Design
         params = [
-            ("Base/Min Current (A):", "0.005"),
-            ("Peak/Max Current (A):", "0.040"),
-            ("Compliance Voltage (V):", "10.0"),
-            ("Cycle Period/Duration (s):", "4.0"),
-            ("Total Test Time (s):", "12.0"),
-            ("Resolution (Points/Cycle):", "200")
+            ("Output Force Mode:", ttk.Combobox(grid_frame, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)", "DC Hold"])),
+            ("Waveform Shape:", ttk.Combobox(grid_frame, textvariable=self.shape_var, values=["Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "DC Hold"])),
+            ("Base/Min Level:", ttk.Entry(grid_frame, textvariable=self.min_val_var)),
+            ("Peak/Max Level:", ttk.Entry(grid_frame, textvariable=self.max_val_var)),
+            ("Compliance Limit:", ttk.Entry(grid_frame, textvariable=self.comp_var)),
+            ("---", None),
+            ("Cycle Period (s):", ttk.Entry(grid_frame, textvariable=self.period_var)),
+            ("Resolution (Points/Cycle):", ttk.Entry(grid_frame, textvariable=self.points_var)),
+            ("Total Test Duration (s):", ttk.Entry(grid_frame, textvariable=self.total_t_var)),
+            ("---", None),
+            ("Aperture (Integration) Time:", ttk.Combobox(grid_frame, textvariable=self.aperture_var, values=["Auto", "1e-5 (10 µs Limit)"])),
+            ("4-Wire Kelvin Sensing:", ttk.Checkbutton(grid_frame, text="Enable Remote Sensing", variable=self.wire_var)),
+            ("Save File Path (.csv):", save_frame),
         ]
 
-        for i, (label_text, default_val) in enumerate(params):
-            ctk.CTkLabel(frame_params, text=label_text).grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
-            entry = ctk.CTkEntry(frame_params, width=150)
-            entry.insert(0, default_val)
-            entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="w")
-            self.inputs[label_text] = entry
-
-        # File Saving
-        frame_save = ctk.CTkFrame(self.tab_config)
-        frame_save.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(frame_save, text="3. Data Logging", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        
-        self.save_name = ctk.CTkEntry(frame_save, width=400, placeholder_text="Enter filename (e.g., test_run_1.csv)")
-        self.save_name.insert(0, "b2910cl_test_data.csv")
-        self.save_name.pack(anchor="w", padx=10, pady=5)
-
-    def build_plot_tab(self, parent, live=False):
-        self.fig = Figure(figsize=(8, 5), dpi=100)
-        self.ax1 = self.fig.add_subplot(111)
-        self.ax2 = self.ax1.twinx()
-        
-        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-        
-        toolbar = NavigationToolbar2Tk(self.canvas, parent)
-        toolbar.update()
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-
-    def build_viewer_tab(self):
-        btn_load = ctk.CTkButton(self.tab_viewer, text="Load CSV File", command=self.load_csv_file)
-        btn_load.pack(pady=10)
-        self.build_plot_tab(self.tab_viewer)
-
-    # ==========================================
-    # HARDWARE COMMUNICATION
-    # ==========================================
-    def scan_visa_resources(self):
-        self.visa_dropdown.set("Scanning...")
-        self.update()
-        try:
-            resources = self.rm.list_resources()
-            if not resources:
-                self.visa_dropdown.configure(values=["No Instruments Found!"])
-                self.visa_dropdown.set("No Instruments Found!")
+        for i, (label, widget) in enumerate(params):
+            if widget is None:
+                ttk.Separator(grid_frame, orient="horizontal").grid(row=i, column=0, columnspan=2, sticky="ew", pady=15)
             else:
-                self.visa_dropdown.configure(values=list(resources))
-                # Auto-select the first USB device if available
-                usb_devs = [r for r in resources if "USB" in r]
-                self.visa_dropdown.set(usb_devs[0] if usb_devs else resources[0])
-        except Exception as e:
-            self.visa_dropdown.set(f"Error: {e}")
+                ttk.Label(grid_frame, text=label, font=('Segoe UI', 11, 'bold')).grid(row=i, column=0, sticky="e", padx=20, pady=8)
+                widget.grid(row=i, column=1, sticky="w", pady=8)
 
-    def connect_instrument(self):
-        addr = self.visa_dropdown.get()
-        if not addr or "No" in addr or "Error" in addr:
-            messagebox.showerror("Connection Error", "Please select a valid VISA address.")
-            return
+    def build_plot_tabs(self):
+        # 1. Live Plot Setup (Tkinter Frame housing PyQtGraph)
+        self.live_tk_frame = tk.Frame(self.tab_live, bg=Theme.PNL)
+        self.live_tk_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.live_glw = pg.GraphicsLayoutWidget()
+        self.live_glw.setBackground(Theme.PNL)
+        self.p_src = self.live_glw.addPlot(row=0, col=0, title="Sourced Signal")
+        self.p_msr = self.live_glw.addPlot(row=1, col=0, title="Measured Response")
+        
+        for p in [self.p_src, self.p_msr]:
+            p.showGrid(x=True, y=True, alpha=0.3)
+            p.getAxis('left').setPen(Theme.FG)
+            p.getAxis('bottom').setPen(Theme.FG)
 
+        self.curve_src = self.p_src.plot(pen=pg.mkPen(Theme.ACC, width=2))
+        self.curve_msr = self.p_msr.plot(pen=pg.mkPen(Theme.ERR, width=2))
+
+        # 2. Offline Viewer Setup
+        ttk.Button(self.tab_viewer, text="📂 Load CSV Data", command=self.load_csv).pack(pady=10)
+        self.view_tk_frame = tk.Frame(self.tab_viewer, bg=Theme.PNL)
+        self.view_tk_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.view_glw = pg.GraphicsLayoutWidget()
+        self.view_glw.setBackground(Theme.PNL)
+        self.vp_src = self.view_glw.addPlot(row=0, col=0, title="Historical Source")
+        self.vp_msr = self.view_glw.addPlot(row=1, col=0, title="Historical Measure")
+        
+        for p in [self.vp_src, self.vp_msr]:
+            p.showGrid(x=True, y=True, alpha=0.3)
+            p.getAxis('left').setPen(Theme.FG)
+            p.getAxis('bottom').setPen(Theme.FG)
+
+        self.vcurve_src = self.vp_src.plot(pen=pg.mkPen(Theme.ACC, width=2))
+        self.vcurve_msr = self.vp_msr.plot(pen=pg.mkPen(Theme.ERR, width=2))
+
+        # Embed Qt Widgets into Tkinter safely
+        self.embed_qt_widget(self.live_glw, self.live_tk_frame)
+        self.embed_qt_widget(self.view_glw, self.view_tk_frame)
+
+    def embed_qt_widget(self, qt_widget, tk_frame):
+        """Cross-platform trick to embed Qt window natively into Tkinter frame with 64-bit safe ctypes."""
+        qt_widget.show()
+        if sys.platform == 'win32':
+            tk_hwnd = wintypes.HWND(tk_frame.winfo_id())
+            qt_hwnd = wintypes.HWND(int(qt_widget.winId()))
+            
+            # Reparent window
+            ctypes.windll.user32.SetParent(qt_hwnd, tk_hwnd)
+            
+            # Remove pop-up styling, set to standard child
+            GWL_STYLE = -16
+            WS_CHILD = 0x40000000
+            WS_VISIBLE = 0x10000000
+            
+            user32 = ctypes.windll.user32
+            
+            # 64-BIT SAFE CTYPES DEFINITIONS
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                GetWindowLong = user32.GetWindowLongPtrW
+                GetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int]
+                GetWindowLong.restype = ctypes.c_ssize_t
+                
+                SetWindowLong = user32.SetWindowLongPtrW
+                SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+                SetWindowLong.restype = ctypes.c_ssize_t
+            else:
+                GetWindowLong = user32.GetWindowLongW
+                GetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int]
+                GetWindowLong.restype = ctypes.c_long
+                
+                SetWindowLong = user32.SetWindowLongW
+                SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+                SetWindowLong.restype = ctypes.c_long
+
+            style = GetWindowLong(qt_hwnd, GWL_STYLE)
+            style = (style & ~0x80000000) | WS_CHILD | WS_VISIBLE
+            SetWindowLong(qt_hwnd, GWL_STYLE, style)
+
+            # Keep resizing synced between Tkinter and Qt
+            def on_resize(e):
+                qt_widget.resize(e.width, e.height)
+            tk_frame.bind("<Configure>", on_resize)
+
+    # ==============================================================================
+    # 3. HARDWARE CONTROL & SCPI ENGINE
+    # ==============================================================================
+    def scan_ports(self):
+        ports = self.rm.list_resources()
+        self.visa_combo['values'] = ports
+        if ports:
+            self.visa_combo.set(ports[0])
+
+    def connect_smu(self):
         try:
-            self.smu = self.rm.open_resource(addr)
+            self.smu = self.rm.open_resource(self.visa_combo.get())
             self.smu.timeout = 10000
             idn = self.smu.query("*IDN?").strip()
-            self.lbl_status.configure(text=f"Connected:\n{idn.split(',')[1]}", text_color="green")
-            self.btn_connect.configure(state="disabled")
+            self.lbl_status.config(text=f"Online: {idn.split(',')[1]}", foreground="#22c55e")
+            self.btn_conn.config(state="disabled")
         except Exception as e:
-            self.lbl_status.configure(text="Connection Failed", text_color="red")
-            messagebox.showerror("VISA Error", str(e))
+            messagebox.showerror("Connection Error", str(e))
 
-    def emergency_stop(self):
+    def stop_test(self):
+        self.is_running = False
         if self.smu:
             try:
                 self.smu.write(":OUTP OFF")
-                self.lbl_status.configure(text="OUTPUT KILLED", text_color="orange")
-            except:
-                pass
-        self.is_running = False
+                self.lbl_status.config(text="Status: KILLED (Output Off)", foreground=Theme.ERR)
+            except: pass
 
-    # ==========================================
-    # TEST EXECUTION ENGINE (Threaded)
-    # ==========================================
-    def start_test_thread(self):
+    def start_test(self):
         if not self.smu:
-            messagebox.showwarning("Not Connected", "Please connect to the instrument first.")
+            messagebox.showwarning("Offline", "Please connect to the instrument.")
             return
-        if self.is_running:
-            return
-            
-        self.is_running = True
-        self.btn_run.configure(state="disabled", text="TEST RUNNING...")
-        self.tabview.set("Live Results Plot")
         
-        # Start hardware control in a background thread to keep GUI active
-        thread = threading.Thread(target=self.execute_test)
-        thread.daemon = True
-        thread.start()
+        # Make sure file path is valid before starting
+        save_file = self.save_var.get()
+        if not save_file:
+            messagebox.showerror("Error", "Please select a valid Save File Path.")
+            return
 
-    def execute_test(self):
+        self.is_running = True
+        self.btn_start.config(state="disabled", text="TEST RUNNING...")
+        self.tabs.select(self.tab_live)
+
+        # Clear historical plotting arrays
+        self.plot_t, self.plot_src, self.plot_msr = [], [], []
+
+        # Update Plot Titles dynamically
+        if "Current" in self.src_mode_var.get():
+            self.p_src.setTitle("Sourced Signal (Current)")
+            self.p_msr.setTitle("Measured Response (Voltage)")
+        else:
+            self.p_src.setTitle("Sourced Signal (Voltage)")
+            self.p_msr.setTitle("Measured Response (Current)")
+
+        # Launch hardware communication on background thread so GUI doesn't freeze
+        threading.Thread(target=self._hardware_thread, daemon=True).start()
+        
+        # Start GUI queue listener
+        self.root.after(50, self._gui_queue_processor)
+
+    def _hardware_thread(self):
         try:
-            # 1. Read UI Parameters
-            min_i  = float(self.inputs["Base/Min Current (A):"].get())
-            max_i  = float(self.inputs["Peak/Max Current (A):"].get())
-            v_lim  = float(self.inputs["Compliance Voltage (V):"].get())
-            period = float(self.inputs["Cycle Period/Duration (s):"].get())
-            total_time = float(self.inputs["Total Test Time (s):"].get())
-            pts_per_cycle = int(self.inputs["Resolution (Points/Cycle):"].get())
-            shape = self.wave_var.get()
-
-            # 2. Mathematical Generator Engine
-            list_values = []
-            step_time = period / pts_per_cycle
+            # 1. Read Setup Variables
+            mode_is_curr = "Current" in self.src_mode_var.get()
+            base = float(self.min_val_var.get())
+            peak = float(self.max_val_var.get())
+            comp = float(self.comp_var.get())
+            period = float(self.period_var.get())
+            pts = int(self.points_var.get())
+            total_time = float(self.total_t_var.get())
             
-            if shape == "Sine Wave":
-                amp = (max_i - min_i) / 2.0
-                off = (max_i + min_i) / 2.0
-                for tick in range(pts_per_cycle):
-                    t = tick * step_time
-                    val = off - amp * math.cos(2 * math.pi * (t / period))
-                    list_values.append(round(val, 6))
-                    
-            elif shape == "Cosine Wave":
-                amp = (max_i - min_i) / 2.0
-                off = (max_i + min_i) / 2.0
-                for tick in range(pts_per_cycle):
-                    t = tick * step_time
-                    val = off + amp * math.cos(2 * math.pi * (t / period))
-                    list_values.append(round(val, 6))
-                    
-            elif shape == "Square Wave (Pulse)":
-                half_pts = pts_per_cycle // 2
-                list_values = [min_i]*half_pts + [max_i]*half_pts
-                
-            elif shape == "Staircase Sweep":
-                # Linear spaced points
-                list_values = list(np.linspace(min_i, max_i, pts_per_cycle))
+            # Math Generator for Arbitrary Waveforms
+            step_time = period / pts
+            amp, off = (peak - base) / 2.0, (peak + base) / 2.0
+            list_vals = []
             
-            elif shape == "DC Hold":
-                list_values = [max_i] * pts_per_cycle
+            shape = self.shape_var.get()
+            for tick in range(pts):
+                t = tick * step_time
+                if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
+                elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
+                elif "Pulse" in shape: val = base if tick < (pts / 2) else peak
+                elif "Triangle" in shape:
+                    if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
+                    else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
+                elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
+                else: val = peak
+                list_vals.append(round(val, 6))
 
-            list_str = ",".join(map(str, list_values))
-            total_source_ticks = int(total_time / step_time)
-
-            # 3. Hardware SCPI Sequence
+            # 2. Hardware SCPI Config
             self.smu.write("*RST")
             self.smu.write("*CLS")
             
-            # Source Setup
-            self.smu.write(":SOUR:FUNC:MODE CURR")
-            self.smu.write(":SOUR:CURR:MODE LIST")
-            self.smu.write(f":SOUR:CURR:RANG {max(abs(min_i), abs(max_i))}")
-            self.smu.write(f":SOUR:LIST:CURR {list_str}")
+            self.smu.write(f":SENS:REMO {'ON' if self.wire_var.get() else 'OFF'}")
             
-            self.smu.write(":TRIG:TRAN:SOUR TIM")
-            self.smu.write(f":TRIG:TRAN:TIM {step_time}") 
-            self.smu.write(f":TRIG:TRAN:COUN {total_source_ticks}") 
+            src_str = "CURR" if mode_is_curr else "VOLT"
+            msr_str = "VOLT" if mode_is_curr else "CURR"
             
-            # Measurement Setup
+            self.smu.write(f":SOUR:FUNC:MODE {src_str}")
+            self.smu.write(f":SOUR:{src_str}:MODE LIST")
+            self.smu.write(f":SOUR:{src_str}:RANG {max(abs(base), abs(peak))}")
+            self.smu.write(f":SOUR:LIST:{src_str} {','.join(map(str, list_vals))}")
+            
             self.smu.write(":SENS:FUNC \"VOLT\",\"CURR\"")
-            self.smu.write(f":SENS:VOLT:PROT {v_lim}")
-            self.smu.write(f":SENS:VOLT:APER {step_time * 0.5}")
-            self.smu.write(f":SENS:CURR:APER {step_time * 0.5}")
+            self.smu.write(f":SENS:{msr_str}:PROT {comp}")
             
+            # Integration Limit checking
+            ap_val = step_time * 0.5 if self.aperture_var.get() == "Auto" else 1e-5
+            self.smu.write(f":SENS:VOLT:APER {ap_val}")
+            self.smu.write(f":SENS:CURR:APER {ap_val}")
+
+            # 3. Chunking Logic (Saves memory & ensures infinite stream)
+            cycles_per_chunk = max(1, int(1.0 / period))
+            ticks_per_chunk = cycles_per_chunk * pts
+            total_ticks = int(total_time / step_time)
+            num_chunks = math.ceil(total_ticks / ticks_per_chunk)
+
+            self.smu.write(":TRIG:TRAN:SOUR TIM")
+            self.smu.write(f":TRIG:TRAN:TIM {step_time}")
             self.smu.write(":TRIG:ACQ:SOUR TIM")
             self.smu.write(f":TRIG:ACQ:TIM {step_time}")
-            self.smu.write(f":TRIG:ACQ:COUN {total_source_ticks}")
             self.smu.write(":FORM:DATA ASC")
 
-            # Extend timeout safely for the length of the test
-            self.smu.timeout = int((total_time + 10) * 1000)
+            # Initialize Save File Headers
+            save_file = self.save_var.get()
+            with open(save_file, 'w', newline='') as f:
+                csv.writer(f).writerow(["Relative Time (s)", f"Sourced ({src_str})", f"Measured ({msr_str})"])
 
-            # 4. EXECUTE
             self.smu.write(":OUTP ON")
-            self.smu.write(":INIT:ACQ")
-            self.smu.write(":INIT:TRAN")
-            
-            self.smu.write("*WAI") # Wait for hardware completion
+            global_t = 0.0
+
+            # 4. Main Execution Loop
+            for chunk in range(num_chunks):
+                if not self.is_running: break
+                
+                t_count = min(ticks_per_chunk, total_ticks - chunk * ticks_per_chunk)
+                self.smu.write(f":TRIG:TRAN:COUN {t_count}")
+                self.smu.write(f":TRIG:ACQ:COUN {t_count}")
+                
+                self.smu.write(":INIT:ACQ")
+                self.smu.write(":INIT:TRAN")
+                
+                # Dynamic timeout handling for massive chunks
+                self.smu.timeout = int(((t_count * step_time) + 10) * 1000)
+                self.smu.write("*WAI")
+                
+                t = self.smu.query_ascii_values(":FETC:ARR:TIME?")
+                c = self.smu.query_ascii_values(":FETC:ARR:CURR?")
+                v = self.smu.query_ascii_values(":FETC:ARR:VOLT?")
+                
+                t_rel = [x + global_t for x in t]
+                src_data = c if mode_is_curr else v
+                msr_data = v if mode_is_curr else c
+                
+                # Instantly append to file
+                with open(save_file, 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    for tt, ss, mm in zip(t_rel, src_data, msr_data):
+                        writer.writerow([tt, ss, mm])
+                
+                # Send to GUI thread for live rendering
+                self.data_queue.put((t_rel, src_data, msr_data))
+                global_t += (t_count * step_time)
+
             self.smu.write(":OUTP OFF")
-
-            # 5. Fetch Data
-            if self.is_running: # Check if emergency stop was hit
-                time_data = self.smu.query_ascii_values(":FETC:ARR:TIME?")
-                curr_data = self.smu.query_ascii_values(":FETC:ARR:CURR?")
-                volt_data = self.smu.query_ascii_values(":FETC:ARR:VOLT?")
-
-                # Save Data
-                filename = self.save_name.get()
-                with open(filename, mode='w', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(["Time (s)", "Current (A)", "Voltage (V)"])
-                    for t, c, v in zip(time_data, curr_data, volt_data):
-                        writer.writerow([t, c, v])
-
-                # Update Plot via UI Thread
-                self.after(0, self.update_live_plot, time_data, curr_data, volt_data)
-
+            
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("Hardware Error", str(e)))
+            self.data_queue.put(Exception(str(e)))
         finally:
-            self.after(0, self.reset_run_button)
+            self.is_running = False
 
-    def reset_run_button(self):
-        self.is_running = False
-        self.btn_run.configure(state="normal", text="START TEST")
+    def _gui_queue_processor(self):
+        """Processes the hardware data buffer into the PyQtGraph instantly."""
         try:
-            self.smu.write(":OUTP OFF")
-        except: pass
+            while True:
+                data = self.data_queue.get_nowait()
+                if isinstance(data, Exception):
+                    messagebox.showerror("Hardware Error", str(data))
+                    break
+                
+                t, src, msr = data
+                self.plot_t.extend(t)
+                self.plot_src.extend(src)
+                self.plot_msr.extend(msr)
+                
+                # Fast NumPy update for OpenGL Qt Render
+                self.curve_src.setData(np.array(self.plot_t), np.array(self.plot_src))
+                self.curve_msr.setData(np.array(self.plot_t), np.array(self.plot_msr))
+                
+        except queue.Empty:
+            pass
 
-    # ==========================================
-    # DATA VISUALIZATION
-    # ==========================================
-    def update_live_plot(self, t, c, v):
-        self.ax1.clear()
-        self.ax2.clear()
+        if self.is_running:
+            self.root.after(30, self._gui_queue_processor)
+        else:
+            self.btn_start.config(state="normal", text="START TEST")
+            self.lbl_status.config(text="Test Complete. Output Off.", foreground="#22c55e")
 
-        c_ma = [x * 1000 for x in c] # Convert to mA
-        
-        self.ax1.plot(t, c_ma, color='tab:red', label="Current (mA)")
-        self.ax1.set_xlabel("Time (s)")
-        self.ax1.set_ylabel("Current (mA)", color='tab:red')
-        self.ax1.tick_params(axis='y', labelcolor='tab:red')
-        self.ax1.grid(True, linestyle='--', alpha=0.5)
+    # ==============================================================================
+    # 4. OFFLINE DATA VIEWER
+    # ==============================================================================
+    def load_csv(self):
+        path = filedialog.askopenfilename(filetypes=[("CSV Data", "*.csv")])
+        if path:
+            try:
+                df = pd.read_csv(path)
+                t = df.iloc[:, 0].values
+                src = df.iloc[:, 1].values
+                msr = df.iloc[:, 2].values
+                
+                self.vcurve_src.setData(t, src)
+                self.vcurve_msr.setData(t, msr)
+                
+                # Update viewer titles based on CSV headers
+                self.vp_src.setTitle(df.columns[1])
+                self.vp_msr.setTitle(df.columns[2])
+                
+                self.tabs.select(self.tab_viewer)
+            except Exception as e:
+                messagebox.showerror("Error Loading CSV", str(e))
 
-        self.ax2.plot(t, v, color='tab:blue', linestyle='--', label="Voltage (V)")
-        self.ax2.set_ylabel("Voltage (V)", color='tab:blue')
-        self.ax2.tick_params(axis='y', labelcolor='tab:blue')
-
-        self.fig.tight_layout()
-        self.canvas.draw()
-
-    def load_csv_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-        if file_path:
-            df = pd.read_csv(file_path)
-            # Assuming headers: Time (s), Current (A), Voltage (V)
-            t = df.iloc[:, 0].values
-            c = df.iloc[:, 1].values
-            v = df.iloc[:, 2].values
-            
-            # Update the plot in the Viewer Tab
-            self.update_live_plot(t, c, v)
-
+# ==============================================================================
+# 5. BOOTSTRAP: EVENT LOOP BRIDGE
+# ==============================================================================
 if __name__ == "__main__":
-    app = B2910CL_ControllerApp()
-    app.mainloop()
+    set_hd_resolution()
+    
+    # 1. Initialize Qt Application in the background
+    qt_app = QtWidgets.QApplication.instance()
+    if qt_app is None:
+        qt_app = QtWidgets.QApplication(sys.argv)
+        
+    # 2. Initialize Tkinter Window
+    root = tk.Tk()
+    app = B2910CL_MasterApp(root)
+    
+    # 3. Bridge the two event loops seamlessly
+    def qt_loop_pump():
+        qt_app.processEvents()
+        root.after(10, qt_loop_pump)
+        
+    qt_loop_pump()
+    root.mainloop()
