@@ -1,5 +1,7 @@
 import sys
 import os
+import ctypes
+from ctypes import wintypes
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import numpy as np
@@ -10,6 +12,12 @@ import queue
 import pyvisa
 import csv
 import time
+
+# PyQtGraph with OpenGL Hardware Acceleration
+import pyqtgraph as pg
+from PyQt5 import QtWidgets, QtCore
+
+pg.setConfigOptions(useOpenGL=True, antialias=True)
 
 # ------------------------------------------------------------------------
 # 1. Global Theme Architecture
@@ -58,7 +66,6 @@ TRACE_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#dc2626', '#7c3aed', '#db2777'
 
 def set_hd_resolution():
     if sys.platform == 'win32':
-        import ctypes
         try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception: pass
 
@@ -90,7 +97,7 @@ class VerticalScrollFrame(ttk.Frame):
             self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 # ------------------------------------------------------------------------
-# 3. Chart Properties & Math Classes
+# 3. Chart Properties & Analytics Classes
 # ------------------------------------------------------------------------
 class ChartPropertiesDialog(tk.Toplevel):
     def __init__(self, parent, chart_obj, chart_key, callback):
@@ -105,7 +112,6 @@ class ChartPropertiesDialog(tk.Toplevel):
         self.chart_key = chart_key
         self.callback = callback
         self.trace_entries = {}
-
         self._build_ui()
 
     def _build_ui(self):
@@ -245,9 +251,6 @@ class MathEngine:
         integral[1:] = cumulative_sum
         return x, integral
 
-# ------------------------------------------------------------------------
-# 4. High Performance Canvas Engine (Native Zero-Lag Tkinter)
-# ------------------------------------------------------------------------
 class AdvancedAnalysisCanvas:
     MAX_DRAW_PTS = 4000  
 
@@ -556,13 +559,12 @@ class AdvancedAnalysisCanvas:
 # ------------------------------------------------------------------------
 # 5. Global State & App Shell (Master Controller)
 # ------------------------------------------------------------------------
-MAX_LIVE_PTS = 50000  # Zero-lag memory rolling buffer
+MAX_LIVE_PTS = 50000  
 
 class App:
     def __init__(self, root):
         self.root = root
         
-        # Fast Startup - No Popup. Default to CWD.
         self.startup_path = os.path.join(os.path.abspath(os.getcwd()), "Experiment_Data.csv").replace("\\", "/")
             
         self.root.title("Keysight B2910CL Precision Control & Analytics Dashboard")
@@ -572,7 +574,6 @@ class App:
 
         self._build_top_menu()
 
-        # SMU Hardware Variables
         self.rm = pyvisa.ResourceManager()
         self.smu = None
         self.connected_port = None
@@ -585,7 +586,6 @@ class App:
         self.test_target_duration = 0.0
         self.test_start_time = 0.0
 
-        # Graphing Variables
         self.global_datasets = {}
         self.global_math = {}
         self.registry_keys = []  
@@ -610,7 +610,6 @@ class App:
         self.root.config(menu=menubar)
 
     def _build_ui_shell(self):
-        # -- TOP HEADER --
         tb = tk.Frame(self.root, bg=Theme.PNL, height=50, relief='flat')
         tb.pack(fill='x', side='top')
         tk.Frame(self.root, bg=Theme.BRD, height=1).pack(fill='x', side='top')
@@ -621,11 +620,9 @@ class App:
         self.lbl_status = tk.Label(tb, text='Hardware Offline', bg=Theme.PNL, fg=Theme.ERR, font=('Segoe UI', 11, 'bold'))
         self.lbl_status.pack(side='left', padx=15)
 
-        # -- MAIN BODY --
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # -- LEFT PANEL (Restored Width: 420px ~ 35%) --
         left = tk.Frame(body, bg=Theme.PNL, width=420, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
@@ -646,7 +643,6 @@ class App:
         self.nb_left = ttk.Notebook(left_top, style='Left.TNotebook')
         self.nb_left.pack(fill='both', expand=True)
 
-        # Tabs
         tab_smu = VerticalScrollFrame(self.nb_left)
         tab_ana = tk.Frame(self.nb_left, bg=Theme.PNL)
         tab_scpi = tk.Frame(self.nb_left, bg=Theme.PNL)
@@ -662,9 +658,6 @@ class App:
             tk.Label(f, text=title, bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(2, 6))
             return f
 
-        # ==========================================
-        # TAB 1: SMU SETUP
-        # ==========================================
         smu_inner = tab_smu.inner
         conn_sec = sec(smu_inner, "HARDWARE CONNECTION")
         self.visa_combo = ttk.Combobox(conn_sec, state='readonly', font=('Segoe UI', 10))
@@ -687,15 +680,18 @@ class App:
         cb_msr = ttk.Combobox(cfg_sec, textvariable=self.msr_mode_var, values=["Auto (Opposite)", "Voltage (V)", "Current (A)", "Resistance (Ω)", "Power (W)"], state="readonly", font=('Segoe UI', 10))
         cb_msr.pack(fill='x', pady=(0,6))
 
-        self.shape_var = tk.StringVar(value="Constant DC")
+        self.shape_var = tk.StringVar(value="Temple Run")
         tk.Label(cfg_sec, text="Waveform Shape:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        cb_shape = ttk.Combobox(cfg_sec, textvariable=self.shape_var, values=["Constant DC", "Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 10))
-        cb_shape.pack(fill='x', pady=(0,6))
         
+        shape_frm = tk.Frame(cfg_sec, bg=Theme.PNL)
+        shape_frm.pack(fill='x', pady=(0,6))
+        cb_shape = ttk.Combobox(shape_frm, textvariable=self.shape_var, values=["Constant DC", "Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Temple Run", "Temple Run (General)", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 10))
+        cb_shape.pack(side='left', fill='x', expand=True)
+
         self.dynamic_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.dynamic_params.pack(fill='x', pady=(0,0))
         
-        self.lbl_min = tk.Label(self.dynamic_params, text="DC Constant Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
         self.lbl_min.grid(row=0, column=0, sticky='w', pady=2)
         self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
         self.ent_min.insert(0, "0.005")
@@ -724,49 +720,50 @@ class App:
                 self.lbl_min.config(text=f"Base/Min Level ({u_src}):")
             self.lbl_max.config(text=f"Peak/Max Level ({u_src}):")
             self.lbl_cmp.config(text=f"Compliance Limit ({u_cmp}):")
+            self.root.after(100, self._update_dynamic_ui)
             
         self.src_mode_var.trace_add('write', _update_units)
         
         self.time_frame_std = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.time_frame_pls = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.time_frame_csv = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.time_frame_temple = tk.Frame(cfg_sec, bg=Theme.PNL)
         
+        # Standard
         tk.Label(self.time_frame_std, text="Cycle Period (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
         self.ent_per = tk.Entry(self.time_frame_std, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
         self.ent_per.insert(0, "4.0")
         self.ent_per.grid(row=0, column=1, sticky='e', pady=2)
         
+        # Pulse
         self.pulse_base_var = tk.StringVar(value="2.0")
         self.pulse_peak_var = tk.StringVar(value="2.0")
         tk.Label(self.time_frame_pls, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
         tk.Entry(self.time_frame_pls, textvariable=self.pulse_base_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=0, column=1, sticky='e', pady=2)
         tk.Label(self.time_frame_pls, text="Time at Peak (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
         tk.Entry(self.time_frame_pls, textvariable=self.pulse_peak_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=1, column=1, sticky='e', pady=2)
-        
         self.lbl_duty = tk.Label(self.time_frame_pls, text="Duty: 50.0% | Period: 4.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'))
         self.lbl_duty.grid(row=2, column=0, columnspan=2, sticky='e', pady=2)
         
-        def _update_duty(*args):
-            try:
-                b = float(self.pulse_base_var.get())
-                p = float(self.pulse_peak_var.get())
-                t = b + p
-                duty = (p / t) * 100 if t > 0 else 0
-                self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {t:.3f}s")
-            except: pass
-        self.pulse_base_var.trace_add('write', _update_duty)
-        self.pulse_peak_var.trace_add('write', _update_duty)
-        
+        # Temple Run (General)
+        self.tr_base_time_var = tk.StringVar(value="5.0")
+        self.tr_step_time_var = tk.StringVar(value="1.0")
+        self.tr_step_size_var = tk.StringVar(value="0.010")
+        tk.Label(self.time_frame_temple, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
+        tk.Entry(self.time_frame_temple, textvariable=self.tr_base_time_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=0, column=1, sticky='e', pady=2)
+        tk.Label(self.time_frame_temple, text="Time per Step (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
+        tk.Entry(self.time_frame_temple, textvariable=self.tr_step_time_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=1, column=1, sticky='e', pady=2)
+        tk.Label(self.time_frame_temple, text="Step Size (A/V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=2, column=0, sticky='w', pady=2)
+        tk.Entry(self.time_frame_temple, textvariable=self.tr_step_size_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15).grid(row=2, column=1, sticky='e', pady=2)
+        self.lbl_tr_period = tk.Label(self.time_frame_temple, text="Total Cycle Period: 0.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'))
+        self.lbl_tr_period.grid(row=3, column=0, columnspan=2, sticky='e', pady=2)
+
         tk.Button(self.time_frame_csv, text="Browse Custom CSV List...", bg=Theme.PNL2, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'), relief='flat', command=self._load_custom_csv).pack(fill='x', pady=2)
         self.lbl_custom = tk.Label(self.time_frame_csv, text="No File Loaded.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 9))
         self.lbl_custom.pack(anchor='w')
 
         self.bottom_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.bottom_params.pack(fill='x', pady=(0,0))
-        
-        # Max Points Resolution
-        self.period_tracker_var = tk.StringVar(value="4.0")
-        self.ent_per.config(textvariable=self.period_tracker_var)
         
         tk.Label(self.bottom_params, text="Points/Cycle (Res):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
         pts_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
@@ -778,27 +775,11 @@ class App:
         chk_max_pts = tk.Checkbutton(pts_frm, text="MAX", variable=self.max_pts_var, bg=Theme.PNL, fg=Theme.ACC, selectcolor=Theme.PNL2, font=('Segoe UI', 10, 'bold'))
         chk_max_pts.pack(side='left', padx=(4,0))
         
-        def _on_max_pts(*args):
-            if self.max_pts_var.get():
-                try: per = float(self.period_tracker_var.get())
-                except: per = 1.0
-                max_allowed = int(per / 1e-5)
-                max_allowed = min(max_allowed, 100000) 
-                self.ent_pts.config(state='normal')
-                self.ent_pts.delete(0, tk.END)
-                self.ent_pts.insert(0, str(max_allowed))
-                self.ent_pts.config(state='disabled')
-            else:
-                self.ent_pts.config(state='normal')
-        self.max_pts_var.trace_add('write', _on_max_pts)
-        self.period_tracker_var.trace_add('write', _on_max_pts)
-
-        # Infinite Loop Time
         tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
         time_entry_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
         time_entry_frm.grid(row=1, column=1, sticky='e', pady=2)
         self.ent_tot = tk.Entry(time_entry_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=8)
-        self.ent_tot.insert(0, "12.0")
+        self.ent_tot.insert(0, "14.0")
         self.ent_tot.pack(side='left')
         self.inf_run_var = tk.BooleanVar(value=False)
         chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 11, 'bold'))
@@ -809,37 +790,27 @@ class App:
             else: self.ent_tot.config(state='normal')
         self.inf_run_var.trace_add('write', _on_inf_run_toggle)
 
-        def _swap_ui(*args):
-            shape = self.shape_var.get()
-            self.time_frame_std.pack_forget()
-            self.time_frame_pls.pack_forget()
-            self.time_frame_csv.pack_forget()
-            
-            if "Constant DC" in shape:
-                self.lbl_max.grid_remove()
-                self.ent_max.grid_remove()
-                self.lbl_min.config(text=f"DC Constant Level ({'A' if 'Current' in self.src_mode_var.get() else 'V'}):")
-                self.ent_pts.config(state='normal')
-                self.ent_pts.delete(0, tk.END)
-                self.ent_pts.insert(0, "100") 
-            else:
-                self.lbl_max.grid(row=1, column=0, sticky='w', pady=2)
-                self.ent_max.grid(row=1, column=1, sticky='e', pady=2)
-                self.lbl_min.config(text=f"Base/Min Level ({'A' if 'Current' in self.src_mode_var.get() else 'V'}):")
-                
-            if "Pulse" in shape: self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
-            elif "Custom" in shape: self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
-            elif "Constant DC" in shape: pass 
-            else: self.time_frame_std.pack(fill='x', after=self.dynamic_params)
-            
-        self.shape_var.trace_add('write', _swap_ui)
-        _swap_ui()
-
         sys_sec_smu = sec(smu_inner, "VIEWPORT CONTROL")
         self.btn_layout_smu = tk.Button(sys_sec_smu, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
         self.btn_layout_smu.pack(fill='x', ipady=3, pady=2)
         tk.Button(sys_sec_smu, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=3, pady=2)
 
+        # Dynamic Handlers
+        self.shape_var.trace_add('write', self._swap_ui)
+        self.ent_min.bind('<KeyRelease>', lambda e: self.root.after(200, self._update_dynamic_ui))
+        self.ent_max.bind('<KeyRelease>', lambda e: self.root.after(200, self._update_dynamic_ui))
+        self.ent_per.bind('<KeyRelease>', lambda e: self.root.after(200, self._update_dynamic_ui))
+        
+        self.pulse_base_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
+        self.pulse_peak_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
+        
+        self.tr_base_time_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
+        self.tr_step_time_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
+        self.tr_step_size_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
+        
+        self.max_pts_var.trace_add('write', lambda *a: self.root.after(100, self._update_dynamic_ui))
+
+        self.root.after(500, self._swap_ui)
 
         # ==========================================
         # FIXED BOTTOM ACTION PANEL 
@@ -959,14 +930,181 @@ class App:
 
 
     # ------------------------------------------------------------------
+    # Pre-Test Waveform Embedded Viewer & UI Logic
+    # ------------------------------------------------------------------
+    def safe_float(self, entry, default=0.0):
+        try: return float(entry.get())
+        except ValueError: return default
+
+    def _get_current_period(self):
+        shape = self.shape_var.get()
+        if shape == "Pulse":
+            try: return float(self.pulse_base_var.get()) + float(self.pulse_peak_var.get())
+            except: return 4.0
+        elif shape == "Temple Run": 
+            return 14.0
+        elif shape == "Temple Run (General)":
+            try:
+                base = self.safe_float(self.ent_min, 0.0)
+                peak = self.safe_float(self.ent_max, 0.040)
+                t_base = self.safe_float(self.tr_base_time_var, 5.0)
+                t_step = self.safe_float(self.tr_step_time_var, 1.0)
+                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
+                if step_sz <= 0: step_sz = 0.010
+                
+                count = 1 
+                c = base + step_sz
+                while c < peak - 1e-9:
+                    count += 1
+                    c += step_sz
+                    if count > 1000: break
+                c = peak - step_sz
+                while c > base + 1e-9:
+                    count += 1
+                    c -= step_sz
+                    if count > 1000: break
+                return t_base + (count * t_step)
+            except: return 10.0
+        elif shape == "Constant DC": 
+            return 1.0
+        else:
+            return self.safe_float(self.ent_per, 4.0)
+
+    def _swap_ui(self, *args):
+        shape = self.shape_var.get()
+        self.time_frame_std.pack_forget()
+        self.time_frame_pls.pack_forget()
+        self.time_frame_csv.pack_forget()
+        self.time_frame_temple.pack_forget()
+        
+        self.lbl_max.grid(row=1, column=0, sticky='w', pady=2)
+        self.ent_max.grid(row=1, column=1, sticky='e', pady=2)
+        self.lbl_min.grid(row=0, column=0, sticky='w', pady=2)
+        self.ent_min.grid(row=0, column=1, sticky='e', pady=2)
+        
+        if "Constant DC" in shape:
+            self.lbl_max.grid_remove()
+            self.ent_max.grid_remove()
+        elif shape == "Temple Run":
+            self.lbl_max.grid_remove()
+            self.ent_max.grid_remove()
+            self.lbl_min.grid_remove()
+            self.ent_min.grid_remove()
+            
+        if "Pulse" in shape: self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
+        elif "Custom" in shape: self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
+        elif shape == "Temple Run (General)": self.time_frame_temple.pack(fill='x', after=self.dynamic_params)
+        elif shape in ["Constant DC", "Temple Run"]: pass 
+        else: self.time_frame_std.pack(fill='x', after=self.dynamic_params)
+        
+        self._update_dynamic_ui()
+
+    def _update_dynamic_ui(self, *args):
+        period = self._get_current_period()
+        shape = self.shape_var.get()
+        
+        if shape == "Temple Run (General)":
+            self.lbl_tr_period.config(text=f"Total Cycle Period: {period:.3f}s")
+            
+        if shape == "Pulse":
+            try:
+                b = float(self.pulse_base_var.get())
+                p = float(self.pulse_peak_var.get())
+                duty = (p / period) * 100 if period > 0 else 0
+                self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {period:.3f}s")
+            except: pass
+            
+        if self.max_pts_var.get():
+            max_allowed = int(period / 1e-5)
+            max_allowed = min(max_allowed, 100000) 
+            self.ent_pts.config(state='normal')
+            self.ent_pts.delete(0, tk.END)
+            self.ent_pts.insert(0, str(max_allowed))
+            self.ent_pts.config(state='disabled')
+
+    def _generate_waveform_arrays(self, pts):
+        shape = self.shape_var.get()
+        base = self.safe_float(self.ent_min, 0.005)
+        peak = self.safe_float(self.ent_max, 0.040)
+        period = self._get_current_period()
+        
+        if period <= 0: period = 1.0
+        step_time = period / pts
+        list_vals = []
+        
+        if "Temple Run" in shape:
+            if shape == "Temple Run":
+                tr_levels = [0.0, 0.0015, 0.010, 0.020, 0.030, 0.040, 0.030, 0.020, 0.010, 0.0015]
+                tr_durs = [5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            else:
+                t_base = self.safe_float(self.tr_base_time_var, 5.0)
+                t_step = self.safe_float(self.tr_step_time_var, 1.0)
+                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
+                if step_sz <= 0: step_sz = 0.001
+                
+                tr_levels = [base]
+                tr_durs = [t_base]
+                c_val = base + step_sz
+                while c_val < peak - 1e-9:
+                    tr_levels.append(c_val)
+                    tr_durs.append(t_step)
+                    c_val += step_sz
+                    if len(tr_levels) > 500: break
+                tr_levels.append(peak)
+                tr_durs.append(t_step)
+                c_val = peak - step_sz
+                while c_val > base + 1e-9:
+                    tr_levels.append(c_val)
+                    tr_durs.append(t_step)
+                    c_val -= step_sz
+                    if len(tr_levels) > 500: break
+            
+            cumulative_times = [sum(tr_durs[:i+1]) for i in range(len(tr_durs))]
+            for tick in range(pts):
+                t = tick * step_time
+                for i, c_time in enumerate(cumulative_times):
+                    if t < c_time + 1e-9:
+                        list_vals.append(round(tr_levels[i], 6))
+                        break
+                else:
+                    list_vals.append(round(tr_levels[-1], 6))
+        
+        elif "Custom" in shape:
+            if not self.custom_list_vals: return [], period
+            list_vals = self.custom_list_vals
+            
+        elif "Constant DC" in shape:
+            list_vals = [base] * pts
+            
+        else:
+            amp, off = (peak - base) / 2.0, (peak + base) / 2.0
+            t_base = self.safe_float(self.pulse_base_var, 2.0)
+            
+            for tick in range(pts):
+                t = tick * step_time
+                if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
+                elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
+                elif "Pulse" in shape: val = base if t < t_base else peak
+                elif "Triangle" in shape:
+                    if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
+                    else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
+                elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
+                else: val = base
+                list_vals.append(round(val, 6))
+
+        return list_vals, period
+
+
+    # ------------------------------------------------------------------
     # Hardware SMU Control Functions
     # ------------------------------------------------------------------
     def _visa_monitor_thread(self):
         while True:
-            try:
-                ports = self.rm.list_resources()
-                self.root.after(0, self._update_ports_gui, ports)
-            except: pass
+            if not self.is_running:
+                try:
+                    ports = self.rm.list_resources()
+                    self.root.after(0, self._update_ports_gui, ports)
+                except: pass
             time.sleep(2)
 
     def _update_ports_gui(self, ports):
@@ -1114,55 +1252,23 @@ class App:
     def _hardware_thread(self):
         try:
             mode_curr = "Current" in self.src_mode_var.get()
-            base = float(self.ent_min.get())
-            peak = float(self.ent_max.get() if self.ent_max.winfo_ismapped() else base)
-            comp = float(self.ent_cmp.get())
-            shape = self.shape_var.get()
+            comp = self.safe_float(self.ent_cmp, 10.0)
             off_mode = self.off_mode_var.get()
             inf_run = self.inf_run_var.get()
+            pts = int(self.safe_float(self.ent_pts, 360))
+            pts = max(10, min(pts, 100000))
             
             try: total_time = float(self.ent_tot.get())
             except ValueError: total_time = 12.0
             
-            if "Pulse" in shape:
-                t_base = float(self.pulse_base_var.get())
-                t_peak = float(self.pulse_peak_var.get())
-                period = t_base + t_peak
-            elif "Constant DC" in shape:
-                period = 1.0  
-            else:
-                period = float(self.ent_per.get())
-                
-            if self.max_pts_var.get():
-                pts = int(period / 50e-6)
-                pts = min(pts, 100000) 
-            else:
-                pts = int(self.ent_pts.get())
+            # Generate mathematically accurate list using shared pipeline
+            list_vals, period = self._generate_waveform_arrays(pts)
+            if not list_vals: raise ValueError("Empty waveform array")
                 
             step_time = period / pts
-            amp, off = (peak - base) / 2.0, (peak + base) / 2.0
-            list_vals = []
-            
-            if "Custom" in shape:
-                if not self.custom_list_vals: raise ValueError("No Custom CSV loaded!")
-                list_vals = self.custom_list_vals
-            elif "Constant DC" in shape:
-                list_vals = [base] * pts
-            else:
-                for tick in range(pts):
-                    t = tick * step_time
-                    if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
-                    elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
-                    elif "Pulse" in shape: val = base if t < t_base else peak
-                    elif "Triangle" in shape:
-                        if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
-                        else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
-                    elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
-                    else: val = base
-                    list_vals.append(round(val, 6))
-
-            initial_val = list_vals[0] if list_vals else base
-            final_val = list_vals[-1] if list_vals else base
+            initial_val = list_vals[0]
+            final_val = list_vals[-1]
+            max_val = max([abs(v) for v in list_vals])
 
             self.smu.write("*RST")
             self.smu.write("*CLS")
@@ -1177,27 +1283,29 @@ class App:
             self.smu.write(f":SOUR:{src_str} {initial_val}") 
             
             self.smu.write(f":SOUR:{src_str}:MODE LIST")
-            self.smu.write(f":SOUR:{src_str}:RANG {max(abs(base), abs(peak))}")
+            self.smu.write(f":SOUR:{src_str}:RANG {max_val}")
             self.smu.write(f":SOUR:LIST:{src_str} {','.join(map(str, list_vals))}")
             
             self.smu.write(":SENS:FUNC \"VOLT\",\"CURR\"")
             self.smu.write(f":SENS:{msr_str}:PROT {comp}")
             
-            ap_val = step_time * 0.5
+            ap_val = max(1e-5, step_time * 0.5)
             self.smu.write(f":SENS:VOLT:APER {ap_val}")
             self.smu.write(f":SENS:CURR:APER {ap_val}")
 
             # TRUE CONTINUOUS PIPELINE CHUNKING LOGIC
             target_chunk_time = 1.0  
-            if "Constant DC" in shape:
+            if "Constant DC" in self.shape_var.get():
                 cycles_per_chunk = 1
             else:
                 cycles_per_chunk = max(1, round(target_chunk_time / period))
                 
             ticks_per_chunk = cycles_per_chunk * pts
             
-            if ticks_per_chunk > 50000:
-                cycles_per_chunk = max(1, 50000 // pts)
+            # FIX: Restrict PyVISA USB Buffer overload 
+            MAX_POINTS_PER_CHUNK = 20000 
+            if ticks_per_chunk > MAX_POINTS_PER_CHUNK:
+                cycles_per_chunk = max(1, MAX_POINTS_PER_CHUNK // pts)
                 ticks_per_chunk = cycles_per_chunk * pts
 
             if inf_run:
@@ -1213,9 +1321,10 @@ class App:
             self.smu.write(f":TRIG:ACQ:TIM {step_time}")
             self.smu.write(":FORM:DATA ASC")
 
+            # EXPLICIT 3-COLUMN CSV WRITE
             save_file = self.save_var.get()
             with open(save_file, 'w', newline='') as f:
-                csv.writer(f).writerow(["Time (s)", f"Sourced ({src_str})", "Voltage (V)", "Current (A)"])
+                csv.writer(f).writerow(["Time (s)", f"Sourced ({src_str})", f"Measured ({msr_str})"])
 
             self.smu.write(":OUTP ON")
             global_t = 0.0
@@ -1225,7 +1334,8 @@ class App:
                 if not inf_run and chunk >= num_chunks:
                     break
                 
-                self.smu.write(":TRAC:CLE")
+                # CRITICAL: Wipes internal memory buffer so it never fills up and stops
+                self.smu.write(":TRAC:CLE") 
                 
                 if inf_run:
                     t_count = ticks_per_chunk
@@ -1251,12 +1361,15 @@ class App:
                 t_rel = [(x - chunk_start_time) + global_t for x in t]
                 
                 src_data = c if mode_curr else v
+                msr_data = v if mode_curr else c
                 
+                # EXPLICIT 3-COLUMN CSV SAVE
                 with open(save_file, 'a', newline='') as f:
                     writer = csv.writer(f)
-                    for tt, ss, vv, cc in zip(t_rel, src_data, v, c):
-                        writer.writerow([tt, ss, vv, cc])
+                    for tt, ss, mm in zip(t_rel, src_data, msr_data):
+                        writer.writerow([tt, ss, mm])
                 
+                # Queue passes all 4 for GUI Power/Resistance calculations
                 self.data_queue.put((t_rel, src_data, v, c))
                 global_t += (t_count * step_time)
                 chunk += 1
