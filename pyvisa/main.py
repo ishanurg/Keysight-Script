@@ -1,9 +1,7 @@
 import sys
 import os
-import ctypes
-from ctypes import wintypes
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, simpledialog
+from tkinter import filedialog, messagebox, ttk
 import numpy as np
 import pandas as pd
 import math
@@ -12,12 +10,6 @@ import queue
 import pyvisa
 import csv
 import time
-
-# PyQtGraph with OpenGL Hardware Acceleration
-import pyqtgraph as pg
-from PyQt5 import QtWidgets, QtCore
-
-pg.setConfigOptions(useOpenGL=True, antialias=True)
 
 # ------------------------------------------------------------------------
 # 1. Global Theme Architecture
@@ -66,6 +58,7 @@ TRACE_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#dc2626', '#7c3aed', '#db2777'
 
 def set_hd_resolution():
     if sys.platform == 'win32':
+        import ctypes
         try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception: pass
 
@@ -97,7 +90,7 @@ class VerticalScrollFrame(ttk.Frame):
             self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 # ------------------------------------------------------------------------
-# 3. Chart Properties & Analytics Classes
+# 3. Chart Properties & Math Classes
 # ------------------------------------------------------------------------
 class ChartPropertiesDialog(tk.Toplevel):
     def __init__(self, parent, chart_obj, chart_key, callback):
@@ -252,6 +245,9 @@ class MathEngine:
         integral[1:] = cumulative_sum
         return x, integral
 
+# ------------------------------------------------------------------------
+# 4. High Performance Canvas Engine (Native Zero-Lag Tkinter)
+# ------------------------------------------------------------------------
 class AdvancedAnalysisCanvas:
     MAX_DRAW_PTS = 4000  
 
@@ -272,7 +268,8 @@ class AdvancedAnalysisCanvas:
         self.num_grid = 5
 
         self.datasets, self.analysis_layers, self.labels = {}, {}, []
-        self.view_xmin = self.view_xmax = self.view_ymin = self.view_ymax = 0.0
+        self.view_xmin = self.view_xmax = 0.0
+        self.view_ymin = self.view_ymax = 0.0
         self.y_min_override = self.y_max_override = None
 
         self.on_view_changed = on_view_changed_callback
@@ -330,7 +327,10 @@ class AdvancedAnalysisCanvas:
 
     def reset_global_viewport(self):
         if not self.datasets and not self.analysis_layers:
-            self.redraw(); return
+            self.view_xmin, self.view_xmax = 0.0, 1.0
+            self.view_ymin, self.view_ymax = 0.0, 1.0
+            self.redraw()
+            return
         
         all_xmin, all_xmax, all_ymin, all_ymax = np.inf, -np.inf, np.inf, -np.inf
 
@@ -340,7 +340,11 @@ class AdvancedAnalysisCanvas:
                 all_xmin, all_xmax = min(all_xmin, d["x"].min()), max(all_xmax, d["x"].max())
                 all_ymin, all_ymax = min(all_ymin, d["y"].min()), max(all_ymax, d["y"].max())
 
-        if all_xmin == np.inf: return
+        if all_xmin == np.inf: 
+            self.view_xmin, self.view_xmax = 0.0, 1.0
+            self.view_ymin, self.view_ymax = 0.0, 1.0
+            self.redraw()
+            return
 
         span_x = all_xmax - all_xmin if all_xmax != all_xmin else 1.0
         span_y = all_ymax - all_ymin if all_ymax != all_ymin else 1.0
@@ -552,11 +556,15 @@ class AdvancedAnalysisCanvas:
 # ------------------------------------------------------------------------
 # 5. Global State & App Shell (Master Controller)
 # ------------------------------------------------------------------------
-MAX_LIVE_PTS = 50000  # Safely handles infinite sweeps without RAM crashing
+MAX_LIVE_PTS = 50000  # Zero-lag memory rolling buffer
 
 class App:
     def __init__(self, root):
         self.root = root
+        
+        # Fast Startup - No Popup. Default to CWD.
+        self.startup_path = os.path.join(os.path.abspath(os.getcwd()), "Experiment_Data.csv").replace("\\", "/")
+            
         self.root.title("Keysight B2910CL Precision Control & Analytics Dashboard")
         self.root.configure(bg=Theme.BG)
         self.root.geometry("1400x850")
@@ -592,7 +600,6 @@ class App:
         self._build_ui_shell()
         self._rebuild_charts()
         
-        # Start Background Visa Scanner
         threading.Thread(target=self._visa_monitor_thread, daemon=True).start()
 
     def _build_top_menu(self):
@@ -618,7 +625,7 @@ class App:
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # -- ENLARGED LEFT PANEL (Fixed Width: 420px) --
+        # -- LEFT PANEL (Restored Width: 420px ~ 35%) --
         left = tk.Frame(body, bg=Theme.PNL, width=420, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
@@ -756,28 +763,50 @@ class App:
 
         self.bottom_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.bottom_params.pack(fill='x', pady=(0,0))
+        
+        # Max Points Resolution
+        self.period_tracker_var = tk.StringVar(value="4.0")
+        self.ent_per.config(textvariable=self.period_tracker_var)
+        
         tk.Label(self.bottom_params, text="Points/Cycle (Res):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=0, column=0, sticky='w', pady=2)
-        self.ent_pts = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        pts_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
+        pts_frm.grid(row=0, column=1, sticky='e', pady=2)
+        self.ent_pts = tk.Entry(pts_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=8)
         self.ent_pts.insert(0, "360")
-        self.ent_pts.grid(row=0, column=1, sticky='e', pady=2)
+        self.ent_pts.pack(side='left')
+        self.max_pts_var = tk.BooleanVar(value=False)
+        chk_max_pts = tk.Checkbutton(pts_frm, text="MAX", variable=self.max_pts_var, bg=Theme.PNL, fg=Theme.ACC, selectcolor=Theme.PNL2, font=('Segoe UI', 10, 'bold'))
+        chk_max_pts.pack(side='left', padx=(4,0))
         
+        def _on_max_pts(*args):
+            if self.max_pts_var.get():
+                try: per = float(self.period_tracker_var.get())
+                except: per = 1.0
+                max_allowed = int(per / 1e-5)
+                max_allowed = min(max_allowed, 100000) 
+                self.ent_pts.config(state='normal')
+                self.ent_pts.delete(0, tk.END)
+                self.ent_pts.insert(0, str(max_allowed))
+                self.ent_pts.config(state='disabled')
+            else:
+                self.ent_pts.config(state='normal')
+        self.max_pts_var.trace_add('write', _on_max_pts)
+        self.period_tracker_var.trace_add('write', _on_max_pts)
+
+        # Infinite Loop Time
         tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
-        
         time_entry_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
         time_entry_frm.grid(row=1, column=1, sticky='e', pady=2)
         self.ent_tot = tk.Entry(time_entry_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=8)
         self.ent_tot.insert(0, "12.0")
         self.ent_tot.pack(side='left')
-        
         self.inf_run_var = tk.BooleanVar(value=False)
-        chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 12, 'bold'))
+        chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 11, 'bold'))
         chk_inf.pack(side='left', padx=(4,0))
         
         def _on_inf_run_toggle(*args):
-            if self.inf_run_var.get():
-                self.ent_tot.config(state='disabled')
-            else:
-                self.ent_tot.config(state='normal')
+            if self.inf_run_var.get(): self.ent_tot.config(state='disabled')
+            else: self.ent_tot.config(state='normal')
         self.inf_run_var.trace_add('write', _on_inf_run_toggle)
 
         def _swap_ui(*args):
@@ -790,6 +819,7 @@ class App:
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
                 self.lbl_min.config(text=f"DC Constant Level ({'A' if 'Current' in self.src_mode_var.get() else 'V'}):")
+                self.ent_pts.config(state='normal')
                 self.ent_pts.delete(0, tk.END)
                 self.ent_pts.insert(0, "100") 
             else:
@@ -805,16 +835,6 @@ class App:
         self.shape_var.trace_add('write', _swap_ui)
         _swap_ui()
 
-        adv_sec = sec(smu_inner, "ADVANCED SETTINGS")
-        self.avg_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(adv_sec, text="Enable Hardware Averaging", variable=self.avg_var, bg=Theme.PNL, fg=Theme.FG, selectcolor=Theme.PNL2, font=('Segoe UI', 10)).pack(anchor='w', pady=(0,2))
-        self.wire_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(adv_sec, text="4-Wire Kelvin Sensing", variable=self.wire_var, bg=Theme.PNL, fg=Theme.FG, selectcolor=Theme.PNL2, font=('Segoe UI', 10)).pack(anchor='w', pady=(0,4))
-        
-        tk.Label(adv_sec, text="Aperture (Integration):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        self.aperture_var = tk.StringVar(value="Auto")
-        ttk.Combobox(adv_sec, textvariable=self.aperture_var, values=["Auto", "1e-5 (10 µs High-Speed)"], state="readonly", font=('Segoe UI', 10)).pack(fill='x', pady=(0,4))
-
         sys_sec_smu = sec(smu_inner, "VIEWPORT CONTROL")
         self.btn_layout_smu = tk.Button(sys_sec_smu, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 10, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
         self.btn_layout_smu.pack(fill='x', ipady=3, pady=2)
@@ -828,7 +848,7 @@ class App:
         action_frm = tk.Frame(left_bottom, bg=Theme.PNL)
         action_frm.pack(fill='x', padx=15, pady=10)
 
-        self.save_var = tk.StringVar(value=os.path.join(os.path.dirname(os.path.abspath(__file__)), "B2910CL_Live.csv"))
+        self.save_var = tk.StringVar(value=self.startup_path)
         tk.Label(action_frm, text="Save Data To:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
         sv_frm = tk.Frame(action_frm, bg=Theme.PNL)
         sv_frm.pack(fill='x', pady=(0, 4))
@@ -1000,6 +1020,7 @@ class App:
             df = pd.read_csv(path, header=None)
             self.custom_list_vals = df.iloc[:, 0].dropna().tolist()
             self.lbl_custom.config(text=f"Loaded: {len(self.custom_list_vals)} points", fg=Theme.ACC)
+            self.ent_pts.config(state='normal')
             self.ent_pts.delete(0, tk.END)
             self.ent_pts.insert(0, str(len(self.custom_list_vals)))
         except Exception as e:
@@ -1066,6 +1087,10 @@ class App:
         if "Auto" in msr_label:
             msr_label = "Measured (Voltage (V))" if "Current" in self.src_mode_var.get() else "Measured (Current (A))"
         
+        # Absolute Zero-Time Graph Reset
+        self.global_datasets.clear()
+        self.registry_keys.clear()
+        
         self.global_datasets["Live_Source"] = {
             "x": np.array([], dtype=float), "y": np.array([], dtype=float), 
             "color": TRACE_COLORS[0], "trace_name": src_label, "visible": True
@@ -1074,9 +1099,7 @@ class App:
             "x": np.array([], dtype=float), "y": np.array([], dtype=float), 
             "color": TRACE_COLORS[3], "trace_name": msr_label, "visible": True
         }
-        
-        if "Live_Source" not in self.registry_keys:
-            self.registry_keys.extend(["Live_Source", "Live_Measure"])
+        self.registry_keys.extend(["Live_Source", "Live_Measure"])
             
         self._refresh_listbox()
         self._update_selection_combos()
@@ -1094,15 +1117,12 @@ class App:
             base = float(self.ent_min.get())
             peak = float(self.ent_max.get() if self.ent_max.winfo_ismapped() else base)
             comp = float(self.ent_cmp.get())
-            pts = int(self.ent_pts.get())
             shape = self.shape_var.get()
             off_mode = self.off_mode_var.get()
             inf_run = self.inf_run_var.get()
             
-            try:
-                total_time = float(self.ent_tot.get())
-            except ValueError:
-                total_time = 12.0
+            try: total_time = float(self.ent_tot.get())
+            except ValueError: total_time = 12.0
             
             if "Pulse" in shape:
                 t_base = float(self.pulse_base_var.get())
@@ -1112,6 +1132,12 @@ class App:
                 period = 1.0  
             else:
                 period = float(self.ent_per.get())
+                
+            if self.max_pts_var.get():
+                pts = int(period / 50e-6)
+                pts = min(pts, 100000) 
+            else:
+                pts = int(self.ent_pts.get())
                 
             step_time = period / pts
             amp, off = (peak - base) / 2.0, (peak + base) / 2.0
@@ -1141,8 +1167,8 @@ class App:
             self.smu.write("*RST")
             self.smu.write("*CLS")
             
-            self.smu.write(f":SENS:REMO {'ON' if self.wire_var.get() else 'OFF'}")
-            if self.avg_var.get(): self.smu.write(":SENS:AVER:STAT ON")
+            self.smu.write(":SENS:REMO OFF")
+            self.smu.write(":SENS:AVER:STAT OFF")
             
             src_str = "CURR" if mode_curr else "VOLT"
             msr_str = "VOLT" if mode_curr else "CURR"
@@ -1157,13 +1183,23 @@ class App:
             self.smu.write(":SENS:FUNC \"VOLT\",\"CURR\"")
             self.smu.write(f":SENS:{msr_str}:PROT {comp}")
             
-            ap_val = step_time * 0.5 if self.aperture_var.get() == "Auto" else 1e-5
+            ap_val = step_time * 0.5
             self.smu.write(f":SENS:VOLT:APER {ap_val}")
             self.smu.write(f":SENS:CURR:APER {ap_val}")
 
-            cycles_per_chunk = max(1, int(1.0 / period))
+            # TRUE CONTINUOUS PIPELINE CHUNKING LOGIC
+            target_chunk_time = 1.0  
+            if "Constant DC" in shape:
+                cycles_per_chunk = 1
+            else:
+                cycles_per_chunk = max(1, round(target_chunk_time / period))
+                
             ticks_per_chunk = cycles_per_chunk * pts
             
+            if ticks_per_chunk > 50000:
+                cycles_per_chunk = max(1, 50000 // pts)
+                ticks_per_chunk = cycles_per_chunk * pts
+
             if inf_run:
                 total_ticks = float('inf')
                 num_chunks = float('inf')
@@ -1183,11 +1219,13 @@ class App:
 
             self.smu.write(":OUTP ON")
             global_t = 0.0
-
             chunk = 0
+
             while self.is_running:
                 if not inf_run and chunk >= num_chunks:
                     break
+                
+                self.smu.write(":TRAC:CLE")
                 
                 if inf_run:
                     t_count = ticks_per_chunk
@@ -1207,7 +1245,11 @@ class App:
                 c = self.smu.query_ascii_values(":FETC:ARR:CURR?")
                 v = self.smu.query_ascii_values(":FETC:ARR:VOLT?")
                 
-                t_rel = [x + global_t for x in t]
+                if not t: break
+                
+                chunk_start_time = t[0]
+                t_rel = [(x - chunk_start_time) + global_t for x in t]
+                
                 src_data = c if mode_curr else v
                 
                 with open(save_file, 'a', newline='') as f:
@@ -1313,20 +1355,13 @@ class App:
         theme_map = Theme.LIGHT_TO_DARK if Theme.is_dark else Theme.DARK_TO_LIGHT
         
         def apply_theme_recursive(w):
-            try:
-                bg = w.cget('bg')
-                if bg.lower() in theme_map: w.config(bg=theme_map[bg.lower()])
+            try: bg = w.cget('bg'); w.config(bg=theme_map[bg.lower()]) if bg.lower() in theme_map else None
             except: pass
-            try:
-                fg = w.cget('fg')
-                if fg.lower() in theme_map: w.config(fg=theme_map[fg.lower()])
+            try: fg = w.cget('fg'); w.config(fg=theme_map[fg.lower()]) if fg.lower() in theme_map else None
             except: pass
-            try:
-                hb = w.cget('highlightbackground')
-                if hb.lower() in theme_map: w.config(highlightbackground=theme_map[hb.lower()])
+            try: hb = w.cget('highlightbackground'); w.config(highlightbackground=theme_map[hb.lower()]) if hb.lower() in theme_map else None
             except: pass
-            for child in w.winfo_children():
-                apply_theme_recursive(child)
+            for child in w.winfo_children(): apply_theme_recursive(child)
                 
         apply_theme_recursive(self.root)
         
@@ -1354,9 +1389,6 @@ class App:
 
     def _on_listbox_select(self, event):
         sel = self.line_registry_box.curselection()
-        if sel:
-            d_id = self.registry_keys[sel[0]]
-            ds = self.global_datasets.get(d_id)
 
     def _show_listbox_context_menu(self, event):
         try:
