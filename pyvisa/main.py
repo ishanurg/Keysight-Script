@@ -1478,7 +1478,7 @@ class App:
             if "Auto" in msr_sel:
                 csv_msr_label = "Measured (Voltage (V))" if mode_curr else "Measured (Current (A))"
                 
-            with open(save_file, 'w', newline='') as f:
+            with open(save_file, 'w', newline='', encoding='utf-8') as f:
                 csv.writer(f).writerow(["Time (s)", f"Sourced ({src_str})", csv_msr_label])
 
             self.smu.write(":OUTP ON")
@@ -1535,7 +1535,7 @@ class App:
                 src_data = c_arr if mode_curr else v_arr
                 
                 # SUPER FAST 3-COLUMN CSV WRITE (Writerows is 100x faster than Writerow)
-                with open(save_file, 'a', newline='') as f:
+                with open(save_file, 'a', newline='', encoding='utf-8') as f:
                     csv.writer(f).writerows(zip(t_rel, src_data, msr_data))
                 
                 self.data_queue.put((t_rel, src_data, msr_data))
