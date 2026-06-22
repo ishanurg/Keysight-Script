@@ -552,6 +552,8 @@ class AdvancedAnalysisCanvas:
 # ------------------------------------------------------------------------
 # 5. Global State & App Shell (Master Controller)
 # ------------------------------------------------------------------------
+MAX_LIVE_PTS = 50000  # Safely handles infinite sweeps without RAM crashing
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -567,9 +569,13 @@ class App:
         self.smu = None
         self.connected_port = None
         self.is_running = False
+        self.manual_stop = False
         self.data_queue = queue.Queue()
         self.is_first_chunk = True
         self.custom_list_vals = []
+        
+        self.test_target_duration = 0.0
+        self.test_start_time = 0.0
 
         # Graphing Variables
         self.global_datasets = {}
@@ -612,7 +618,7 @@ class App:
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # -- LEFT PANEL (Fixed Width: 420px) --
+        # -- ENLARGED LEFT PANEL (Fixed Width: 420px) --
         left = tk.Frame(body, bg=Theme.PNL, width=420, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
@@ -630,17 +636,17 @@ class App:
         style.configure('Left.TNotebook.Tab', font=('Segoe UI', 10, 'bold'), padding=[12, 6], background=Theme.PNL2, foreground=Theme.DIM)
         style.map('Left.TNotebook.Tab', background=[('selected', Theme.PNL)], foreground=[('selected', Theme.ACC)])
 
-        nb_left = ttk.Notebook(left_top, style='Left.TNotebook')
-        nb_left.pack(fill='both', expand=True)
+        self.nb_left = ttk.Notebook(left_top, style='Left.TNotebook')
+        self.nb_left.pack(fill='both', expand=True)
 
         # Tabs
-        tab_smu = VerticalScrollFrame(nb_left)
-        tab_ana = tk.Frame(nb_left, bg=Theme.PNL)
-        tab_scpi = tk.Frame(nb_left, bg=Theme.PNL)
+        tab_smu = VerticalScrollFrame(self.nb_left)
+        tab_ana = tk.Frame(self.nb_left, bg=Theme.PNL)
+        tab_scpi = tk.Frame(self.nb_left, bg=Theme.PNL)
         
-        nb_left.add(tab_smu, text="🔌 SMU Setup")
-        nb_left.add(tab_ana, text="📊 Analytics")
-        nb_left.add(tab_scpi, text="💻 SCPI Terminal")
+        self.nb_left.add(tab_smu, text="🔌 SMU Setup")
+        self.nb_left.add(tab_ana, text="📊 Analytics")
+        self.nb_left.add(tab_scpi, text="💻 SCPI Terminal")
         
         def sec(parent, title):
             tk.Frame(parent, bg=Theme.SEP, height=1).pack(fill='x')
@@ -674,21 +680,21 @@ class App:
         cb_msr = ttk.Combobox(cfg_sec, textvariable=self.msr_mode_var, values=["Auto (Opposite)", "Voltage (V)", "Current (A)", "Resistance (Ω)", "Power (W)"], state="readonly", font=('Segoe UI', 10))
         cb_msr.pack(fill='x', pady=(0,6))
 
-        self.shape_var = tk.StringVar(value="Square (Pulse)")
+        self.shape_var = tk.StringVar(value="Constant DC")
         tk.Label(cfg_sec, text="Waveform Shape:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).pack(anchor='w')
-        cb_shape = ttk.Combobox(cfg_sec, textvariable=self.shape_var, values=["Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 10))
+        cb_shape = ttk.Combobox(cfg_sec, textvariable=self.shape_var, values=["Constant DC", "Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 10))
         cb_shape.pack(fill='x', pady=(0,6))
         
         self.dynamic_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.dynamic_params.pack(fill='x', pady=(0,0))
         
-        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_min = tk.Label(self.dynamic_params, text="DC Constant Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
         self.lbl_min.grid(row=0, column=0, sticky='w', pady=2)
         self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
         self.ent_min.insert(0, "0.005")
         self.ent_min.grid(row=0, column=1, sticky='e', pady=2)
 
-        self.lbl_max = tk.Label(self.dynamic_params, text="Peak/Max Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
+        self.lbl_max = tk.Label(self.dynamic_params, text="Peak Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10))
         self.lbl_max.grid(row=1, column=0, sticky='w', pady=2)
         self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
         self.ent_max.insert(0, "0.040")
@@ -704,9 +710,14 @@ class App:
             is_curr = "Current" in self.src_mode_var.get()
             u_src = "A" if is_curr else "V"
             u_cmp = "V" if is_curr else "A"
-            self.lbl_min.config(text=f"Base/Min Level ({u_src}):")
+            shape = self.shape_var.get()
+            if "Constant DC" in shape:
+                self.lbl_min.config(text=f"DC Constant Level ({u_src}):")
+            else:
+                self.lbl_min.config(text=f"Base/Min Level ({u_src}):")
             self.lbl_max.config(text=f"Peak/Max Level ({u_src}):")
             self.lbl_cmp.config(text=f"Compliance Limit ({u_cmp}):")
+            
         self.src_mode_var.trace_add('write', _update_units)
         
         self.time_frame_std = tk.Frame(cfg_sec, bg=Theme.PNL)
@@ -751,18 +762,46 @@ class App:
         self.ent_pts.grid(row=0, column=1, sticky='e', pady=2)
         
         tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', pady=2)
-        self.ent_tot = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=15)
+        
+        time_entry_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
+        time_entry_frm.grid(row=1, column=1, sticky='e', pady=2)
+        self.ent_tot = tk.Entry(time_entry_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 10), width=8)
         self.ent_tot.insert(0, "12.0")
-        self.ent_tot.grid(row=1, column=1, sticky='e', pady=2)
+        self.ent_tot.pack(side='left')
+        
+        self.inf_run_var = tk.BooleanVar(value=False)
+        chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 12, 'bold'))
+        chk_inf.pack(side='left', padx=(4,0))
+        
+        def _on_inf_run_toggle(*args):
+            if self.inf_run_var.get():
+                self.ent_tot.config(state='disabled')
+            else:
+                self.ent_tot.config(state='normal')
+        self.inf_run_var.trace_add('write', _on_inf_run_toggle)
 
         def _swap_ui(*args):
             shape = self.shape_var.get()
             self.time_frame_std.pack_forget()
             self.time_frame_pls.pack_forget()
             self.time_frame_csv.pack_forget()
+            
+            if "Constant DC" in shape:
+                self.lbl_max.grid_remove()
+                self.ent_max.grid_remove()
+                self.lbl_min.config(text=f"DC Constant Level ({'A' if 'Current' in self.src_mode_var.get() else 'V'}):")
+                self.ent_pts.delete(0, tk.END)
+                self.ent_pts.insert(0, "100") 
+            else:
+                self.lbl_max.grid(row=1, column=0, sticky='w', pady=2)
+                self.ent_max.grid(row=1, column=1, sticky='e', pady=2)
+                self.lbl_min.config(text=f"Base/Min Level ({'A' if 'Current' in self.src_mode_var.get() else 'V'}):")
+                
             if "Pulse" in shape: self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
             elif "Custom" in shape: self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
+            elif "Constant DC" in shape: pass 
             else: self.time_frame_std.pack(fill='x', after=self.dynamic_params)
+            
         self.shape_var.trace_add('write', _swap_ui)
         _swap_ui()
 
@@ -866,6 +905,16 @@ class App:
         right = tk.Frame(body, bg=Theme.BG)
         right.pack(side='left', fill='both', expand=True, padx=15, pady=15)
 
+        # Timer & Status Bar Above Stats
+        self.timer_frame = tk.Frame(right, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.SEP)
+        self.timer_frame.pack(fill='x', side='top', pady=(0, 8))
+        
+        self.lbl_exp_status = tk.Label(self.timer_frame, text="EXPERIMENT IDLE", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 12, 'bold'))
+        self.lbl_exp_status.pack(side='left', padx=10, pady=8)
+        
+        self.lbl_exp_time = tk.Label(self.timer_frame, text="Time Remaining: --:--", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 13, 'bold'))
+        self.lbl_exp_time.pack(side='right', padx=10, pady=8)
+
         stats_frame = tk.Frame(right, bg=Theme.BG)
         stats_frame.pack(fill='x', side='top', pady=(0, 8))
 
@@ -962,11 +1011,30 @@ class App:
 
     def _stop_test(self):
         self.is_running = False
+        self.manual_stop = True
         if self.smu:
             try:
                 self.smu.write(":OUTP OFF")
                 self.lbl_status.config(text="Hardware KILLED (Output OFF)", fg=Theme.ERR)
             except: pass
+
+    def _update_timer_loop(self):
+        if not self.is_running:
+            return
+            
+        if self.inf_run_var.get():
+            self.lbl_exp_time.config(text="Time Remaining: INFINITE (∞)")
+            self.root.after(500, self._update_timer_loop)
+            return
+
+        elapsed = time.time() - self.test_start_time
+        rem = max(0, self.test_target_duration - elapsed)
+        
+        mins, secs = divmod(int(rem), 60)
+        self.lbl_exp_time.config(text=f"Time Remaining: {mins:02d}:{secs:02d}")
+        
+        if rem > 0:
+            self.root.after(200, self._update_timer_loop)
 
     def _start_test(self):
         if not self.smu:
@@ -974,7 +1042,24 @@ class App:
             return
 
         self.is_running = True
+        self.manual_stop = False
         self.btn_start.config(state="disabled", text="TEST RUNNING...")
+        
+        self.nb_left.tab(1, state='disabled')
+        
+        inf_run = self.inf_run_var.get()
+        if inf_run:
+            self.test_target_duration = float('inf')
+        else:
+            try:
+                self.test_target_duration = float(self.ent_tot.get())
+            except ValueError:
+                self.test_target_duration = 12.0
+            
+        self.test_start_time = time.time()
+        self.lbl_exp_status.config(text="EXPERIMENT RUNNING...", fg="#f59e0b")
+        self.lbl_exp_time.config(text="Time Remaining: --:--", fg=Theme.ACC)
+        self._update_timer_loop()
         
         src_label = f"Sourced ({self.src_mode_var.get()})"
         msr_label = f"Measured ({self.msr_mode_var.get()})"
@@ -1007,17 +1092,24 @@ class App:
         try:
             mode_curr = "Current" in self.src_mode_var.get()
             base = float(self.ent_min.get())
-            peak = float(self.ent_max.get())
+            peak = float(self.ent_max.get() if self.ent_max.winfo_ismapped() else base)
             comp = float(self.ent_cmp.get())
             pts = int(self.ent_pts.get())
-            total_time = float(self.ent_tot.get())
             shape = self.shape_var.get()
             off_mode = self.off_mode_var.get()
+            inf_run = self.inf_run_var.get()
+            
+            try:
+                total_time = float(self.ent_tot.get())
+            except ValueError:
+                total_time = 12.0
             
             if "Pulse" in shape:
                 t_base = float(self.pulse_base_var.get())
                 t_peak = float(self.pulse_peak_var.get())
                 period = t_base + t_peak
+            elif "Constant DC" in shape:
+                period = 1.0  
             else:
                 period = float(self.ent_per.get())
                 
@@ -1028,6 +1120,8 @@ class App:
             if "Custom" in shape:
                 if not self.custom_list_vals: raise ValueError("No Custom CSV loaded!")
                 list_vals = self.custom_list_vals
+            elif "Constant DC" in shape:
+                list_vals = [base] * pts
             else:
                 for tick in range(pts):
                     t = tick * step_time
@@ -1039,10 +1133,8 @@ class App:
                         else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
                     elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
                     else: val = base
-
                     list_vals.append(round(val, 6))
 
-            # EXTRACT EXACT START AND END TO PREVENT ZERO-SPIKE GLITCH
             initial_val = list_vals[0] if list_vals else base
             final_val = list_vals[-1] if list_vals else base
 
@@ -1056,8 +1148,6 @@ class App:
             msr_str = "VOLT" if mode_curr else "CURR"
             
             self.smu.write(f":SOUR:FUNC:MODE {src_str}")
-            
-            # CRITICAL ZERO-GLITCH FIX: Bias the hardware to the exact first point of the wave BEFORE output turns on
             self.smu.write(f":SOUR:{src_str} {initial_val}") 
             
             self.smu.write(f":SOUR:{src_str}:MODE LIST")
@@ -1073,8 +1163,13 @@ class App:
 
             cycles_per_chunk = max(1, int(1.0 / period))
             ticks_per_chunk = cycles_per_chunk * pts
-            total_ticks = int(total_time / step_time)
-            num_chunks = math.ceil(total_ticks / ticks_per_chunk)
+            
+            if inf_run:
+                total_ticks = float('inf')
+                num_chunks = float('inf')
+            else:
+                total_ticks = int(total_time / step_time)
+                num_chunks = math.ceil(total_ticks / ticks_per_chunk)
 
             self.smu.write(":TRIG:TRAN:SOUR TIM")
             self.smu.write(f":TRIG:TRAN:TIM {step_time}")
@@ -1089,10 +1184,16 @@ class App:
             self.smu.write(":OUTP ON")
             global_t = 0.0
 
-            for chunk in range(num_chunks):
-                if not self.is_running: break
+            chunk = 0
+            while self.is_running:
+                if not inf_run and chunk >= num_chunks:
+                    break
                 
-                t_count = min(ticks_per_chunk, total_ticks - chunk * ticks_per_chunk)
+                if inf_run:
+                    t_count = ticks_per_chunk
+                else:
+                    t_count = min(ticks_per_chunk, total_ticks - chunk * ticks_per_chunk)
+                    
                 self.smu.write(f":TRIG:TRAN:COUN {t_count}")
                 self.smu.write(f":TRIG:ACQ:COUN {t_count}")
                 
@@ -1116,12 +1217,12 @@ class App:
                 
                 self.data_queue.put((t_rel, src_data, v, c))
                 global_t += (t_count * step_time)
+                chunk += 1
 
-            # GRACEFUL EXIT (Advanced Off State with Zero Glitch Protection)
             if self.is_running:
                 if off_mode == "Hold Last Level":
                     self.smu.write(f":SOUR:{src_str}:MODE FIX")
-                    self.smu.write(f":SOUR:{src_str} {final_val}") # Safely rest exactly where the wave finished
+                    self.smu.write(f":SOUR:{src_str} {final_val}") 
                 elif off_mode == "Turn OFF (High-Z)":
                     self.smu.write(f":SOUR:{src_str}:MODE FIX")
                     self.smu.write(f":SOUR:{src_str} {final_val}")
@@ -1169,6 +1270,12 @@ class App:
                 lm["x"] = np.concatenate([lm["x"], t])
                 lm["y"] = np.concatenate([lm["y"], msr])
 
+                if len(ls["x"]) > MAX_LIVE_PTS:
+                    ls["x"] = ls["x"][-MAX_LIVE_PTS:]
+                    ls["y"] = ls["y"][-MAX_LIVE_PTS:]
+                    lm["x"] = lm["x"][-MAX_LIVE_PTS:]
+                    lm["y"] = lm["y"][-MAX_LIVE_PTS:]
+
                 for chart in self.charts:
                     chart.register_dataset("Live_Source", ls["x"], ls["y"], ls["color"], trace_name=ls["trace_name"])
                     chart.register_dataset("Live_Measure", lm["x"], lm["y"], lm["color"], trace_name=lm["trace_name"])
@@ -1190,9 +1297,16 @@ class App:
             self.root.after(30, self._gui_queue_processor)
         else:
             self.btn_start.config(state="normal", text="▶ START TEST")
+            self.nb_left.tab(1, state='normal') 
+            if self.manual_stop:
+                self.lbl_exp_status.config(text="EXPERIMENT ABORTED", fg=Theme.ERR)
+                self.lbl_exp_time.config(text="Time Remaining: 00:00", fg=Theme.ERR)
+            else:
+                self.lbl_exp_status.config(text="EXPERIMENT FINISHED", fg="#10b981")
+                self.lbl_exp_time.config(text="Time Remaining: 00:00", fg="#10b981")
 
     # ------------------------------------------------------------------
-    # Theme & Analytics Methods (From combined.py template)
+    # Theme & Analytics Methods
     # ------------------------------------------------------------------
     def _toggle_dark_mode(self):
         Theme.toggle()
