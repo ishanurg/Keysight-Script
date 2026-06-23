@@ -600,6 +600,13 @@ class App:
         self.custom_steps = []
         self.custom_locked = False
 
+        # Create Qt application instance for preview windows
+        self.qt_app = QtWidgets.QApplication.instance()
+        if self.qt_app is None:
+            self.qt_app = QtWidgets.QApplication([])
+        self._preview_window = None
+        self._preview_timer_id = None
+
         self._build_ui_shell()
         self._rebuild_charts()
         
@@ -812,7 +819,7 @@ class App:
             else:
                 self.ent_tot.config(state='normal')
                 self.ent_cycles.config(state='normal')
-                self._on_cycles_changed()  # re-evaluate
+                self._on_cycles_changed()
         self.inf_run_var.trace_add('write', _on_inf_run_toggle)
 
         # Swap UI based on shape
@@ -893,7 +900,7 @@ class App:
         tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 7, 'bold')).pack(side='right', padx=(2,0))
 
         tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 7)).pack(anchor='w')
-        self.off_mode_var = tk.StringVar(value="Hold Last Level")
+        self.off_mode_var = tk.StringVar(value="Turn OFF (Normal)")
         ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Last Level"], state="readonly", font=('Segoe UI', 8)).pack(fill='x', pady=(0,4))
 
         ctrl_btn_frm = tk.Frame(action_frm, bg=Theme.PNL)
@@ -1080,7 +1087,7 @@ class App:
             self.custom_steps_listbox.insert(tk.END, f"Step {idx+1}: {level:.4g} A  {dur*1000:.0f} ms")
         total = sum(dur for _, dur in self.custom_steps)
         self.lbl_custom_period.config(text=f"Total Cycle Period: {total:.3f} s")
-        # Also update period label for other shapes? Not needed.
+        self._on_cycles_changed()
 
     def _on_cycles_changed(self, event=None):
         """If cycles > 0, compute total time and disable total time entry."""
@@ -1099,9 +1106,6 @@ class App:
             self.ent_tot.config(state='normal')
             if self.inf_run_var.get():
                 self.ent_tot.config(state='disabled')
-            else:
-                # If cycles == 0, enable total time
-                pass
 
     # ------------------------------------------------------------------
     # Data Array Generation Logic 
@@ -1135,7 +1139,6 @@ class App:
                 duty = (p / period) * 100 if period > 0 else 0
                 self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {period:.3f}s")
             except: pass
-        # Update cycles total time if needed
         self._on_cycles_changed()
 
     def _generate_waveform_arrays(self, pts):
@@ -1203,56 +1206,67 @@ class App:
         return list_vals, period
 
     # ------------------------------------------------------------------
-    # Preview Waveform (one cycle)
+    # Preview Waveform (one cycle) – using pyqtgraph
     # ------------------------------------------------------------------
     def _preview_waveform(self):
-        """Open a new window showing one cycle of the current waveform."""
+        """Open a new window showing one cycle of the current waveform using pyqtgraph."""
         shape = self.shape_var.get()
         period = self._get_current_period()
         if period <= 0:
             messagebox.showerror("Error", "Invalid period.")
             return
-        # Get sampling rate
         sampling_rate = self.safe_float(self.ent_sampling, 100)
         if sampling_rate <= 0: sampling_rate = 100
+        sampling_rate = min(sampling_rate, 1000)
         pts = int(sampling_rate * period)
         if pts < 2: pts = 2
-        if pts > 5000: pts = 5000  # limit for preview
+        if pts > 5000: pts = 5000
 
         list_vals, _ = self._generate_waveform_arrays(pts)
         if not list_vals:
             messagebox.showerror("Error", "Could not generate waveform. Check settings.")
             return
 
-        # Create time array
-        t = np.linspace(0, period, len(list_vals))
-
-        # Create a new window with pyqtgraph
-        win = QtWidgets.QMainWindow()
-        win.setWindowTitle("Waveform Preview (One Cycle)")
-        win.setGeometry(100, 100, 600, 400)
+        # Create a new Qt window
+        if self._preview_window is not None:
+            try:
+                self._preview_window.close()
+            except:
+                pass
+        self._preview_window = QtWidgets.QMainWindow()
+        self._preview_window.setWindowTitle("Waveform Preview (One Cycle)")
+        self._preview_window.setGeometry(100, 100, 600, 400)
         central_widget = QtWidgets.QWidget()
-        win.setCentralWidget(central_widget)
+        self._preview_window.setCentralWidget(central_widget)
         layout = QtWidgets.QVBoxLayout(central_widget)
 
         plot_widget = pg.PlotWidget()
         layout.addWidget(plot_widget)
 
-        # Plot
+        t = np.linspace(0, period, len(list_vals))
         plot_widget.plot(t, list_vals, pen=pg.mkPen(color='b', width=2))
         plot_widget.setLabel('left', 'Level', units='A' if "Current" in self.src_mode_var.get() else 'V')
         plot_widget.setLabel('bottom', 'Time', units='s')
         plot_widget.setTitle(f"{shape} - Period = {period:.3f} s, Samples = {len(list_vals)}")
 
-        # Show some stats
         stats = f"Min: {min(list_vals):.4g}, Max: {max(list_vals):.4g}, Mean: {np.mean(list_vals):.4g}"
         label = QtWidgets.QLabel(stats)
         label.setStyleSheet("font-family: Segoe UI; font-size: 10px; color: #2563eb;")
         layout.addWidget(label)
 
-        win.show()
-        # Keep reference to avoid garbage collection
-        self._preview_window = win
+        self._preview_window.show()
+        # Start timer to process Qt events
+        if self._preview_timer_id is not None:
+            self.root.after_cancel(self._preview_timer_id)
+        self._process_qt_events()
+
+    def _process_qt_events(self):
+        """Process Qt events periodically to keep the preview window responsive."""
+        if self._preview_window is not None:
+            self.qt_app.processEvents()
+            self._preview_timer_id = self.root.after(100, self._process_qt_events)
+        else:
+            self._preview_timer_id = None
 
     # ------------------------------------------------------------------
     # Hardware SMU Control Functions
@@ -1367,15 +1381,13 @@ class App:
         if inf_run:
             self.test_target_duration = float('inf')
         else:
-            # Check if cycles > 0 and total time is computed
             try:
                 cycles = int(self.ent_cycles.get())
             except ValueError:
                 cycles = 0
             if cycles > 0:
                 period = self._get_current_period()
-                self.test_target_duration = cycles * period + 2.0  # buffer 2s
-                # Update total time entry (already disabled)
+                self.test_target_duration = cycles * period + 2.0
             else:
                 try:
                     self.test_target_duration = float(self.ent_tot.get())
@@ -1427,14 +1439,14 @@ class App:
             
             sampling_rate = self.safe_float(self.ent_sampling, 100)
             if sampling_rate <= 0: sampling_rate = 100
-            
+            sampling_rate = min(sampling_rate, 1000)
+
             period = self._get_current_period()
             if period <= 0: period = 1.0
             pts = int(sampling_rate * period)
             if pts < 2: pts = 2
             if pts > 100000: pts = 100000
             
-            # Total time and cycles handling
             if inf_run:
                 total_ticks = float('inf')
             else:
@@ -1443,7 +1455,7 @@ class App:
                 except ValueError:
                     cycles = 0
                 if cycles > 0:
-                    total_time = cycles * period + 2.0  # buffer
+                    total_time = cycles * period + 2.0
                 else:
                     total_time = self.safe_float(self.ent_tot, 12.0)
                 total_ticks = int(total_time / (period / pts)) if period > 0 else 0
