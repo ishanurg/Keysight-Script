@@ -771,24 +771,36 @@ class App:
         self.lbl_duty = tk.Label(self.time_frame_pls, text="Duty: 50.0% | Period: 4.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 7, 'bold'))
         self.lbl_duty.grid(row=2, column=0, columnspan=2, sticky='e', pady=1)
         
-        # ---- Custom Pattern Builder (with Lock) ----
+        # ---- Custom Pattern Builder (with Lock, Edit, Insert, Export, Import) ----
         custom_frame = self.time_frame_custom
 
         # Step listbox
         self.custom_steps_listbox = tk.Listbox(custom_frame, bg=Theme.PNL2, fg=Theme.FG, height=5, font=('Segoe UI', 8))
         self.custom_steps_listbox.pack(fill='x', pady=2)
-        # Buttons row
-        btn_row = tk.Frame(custom_frame, bg=Theme.PNL)
-        btn_row.pack(fill='x', pady=1)
-        self.btn_add_step = tk.Button(btn_row, text="Add Step (+)", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._add_custom_step)
+        
+        # Row 1: Add, Insert, Edit, Remove, Clear
+        btn_row1 = tk.Frame(custom_frame, bg=Theme.PNL)
+        btn_row1.pack(fill='x', pady=1)
+        self.btn_add_step = tk.Button(btn_row1, text="Add (+)", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._add_custom_step)
         self.btn_add_step.pack(side='left', fill='x', expand=True, padx=(0,2))
-        self.btn_remove_step = tk.Button(btn_row, text="Remove Sel. (-)", bg=Theme.PNL2, fg='#dc2626', relief='flat', font=('Segoe UI', 7, 'bold'), command=self._remove_custom_step)
+        self.btn_insert_step = tk.Button(btn_row1, text="Insert", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._insert_custom_step)
+        self.btn_insert_step.pack(side='left', fill='x', expand=True, padx=(2,2))
+        self.btn_edit_step = tk.Button(btn_row1, text="Edit", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._edit_custom_step)
+        self.btn_edit_step.pack(side='left', fill='x', expand=True, padx=(2,2))
+        self.btn_remove_step = tk.Button(btn_row1, text="Remove (-)", bg=Theme.PNL2, fg='#dc2626', relief='flat', font=('Segoe UI', 7, 'bold'), command=self._remove_custom_step)
         self.btn_remove_step.pack(side='left', fill='x', expand=True, padx=(2,2))
-        self.btn_clear_steps = tk.Button(btn_row, text="Clear All", bg=Theme.PNL2, fg=Theme.DIM, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._clear_custom_steps)
+        self.btn_clear_steps = tk.Button(btn_row1, text="Clear", bg=Theme.PNL2, fg=Theme.DIM, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._clear_custom_steps)
         self.btn_clear_steps.pack(side='left', fill='x', expand=True, padx=(2,0))
-        # Lock/Unlock button
-        self.btn_lock_custom = tk.Button(custom_frame, text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._toggle_custom_lock)
-        self.btn_lock_custom.pack(fill='x', pady=1)
+        
+        # Row 2: Lock, Export, Import
+        btn_row2 = tk.Frame(custom_frame, bg=Theme.PNL)
+        btn_row2.pack(fill='x', pady=1)
+        self.btn_lock_custom = tk.Button(btn_row2, text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._toggle_custom_lock)
+        self.btn_lock_custom.pack(side='left', fill='x', expand=True, padx=(0,2))
+        self.btn_export_csv = tk.Button(btn_row2, text="💾 Export CSV", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._export_custom_pattern)
+        self.btn_export_csv.pack(side='left', fill='x', expand=True, padx=(2,2))
+        self.btn_import_csv = tk.Button(btn_row2, text="📂 Import CSV", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._import_custom_pattern)
+        self.btn_import_csv.pack(side='left', fill='x', expand=True, padx=(2,0))
 
         self.lbl_custom_period = tk.Label(custom_frame, text="Total Cycle Period: 0.0 s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 8, 'bold'))
         self.lbl_custom_period.pack(anchor='e', pady=2)
@@ -1025,29 +1037,65 @@ class App:
         self.chart_container.pack(fill='both', expand=True, padx=4, pady=4)
 
     # ------------------------------------------------------------------
-    # Custom Pattern Step Management (with Lock)
+    # Custom Pattern Step Management (with Lock, Edit, Insert, Export, Import)
     # ------------------------------------------------------------------
     def _toggle_custom_lock(self):
         self.custom_locked = not self.custom_locked
         if self.custom_locked:
             self.btn_lock_custom.config(text="🔓 Unlock Pattern", bg='#fef2f2', fg='#dc2626')
+            # Disable editing buttons (Add, Insert, Edit, Remove, Clear, Import)
             self.btn_add_step.config(state='disabled')
+            self.btn_insert_step.config(state='disabled')
+            self.btn_edit_step.config(state='disabled')
             self.btn_remove_step.config(state='disabled')
             self.btn_clear_steps.config(state='disabled')
+            self.btn_import_csv.config(state='disabled')
             self.custom_steps_listbox.config(state='disabled')
+            # Export remains enabled
         else:
             self.btn_lock_custom.config(text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC)
             self.btn_add_step.config(state='normal')
+            self.btn_insert_step.config(state='normal')
+            self.btn_edit_step.config(state='normal')
             self.btn_remove_step.config(state='normal')
             self.btn_clear_steps.config(state='normal')
+            self.btn_import_csv.config(state='normal')
             self.custom_steps_listbox.config(state='normal')
 
     def _add_custom_step(self):
         if self.custom_locked:
             messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
             return
+        self._show_step_dialog("Add Step", insert_index=None)
+
+    def _insert_custom_step(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
+            return
+        sel = self.custom_steps_listbox.curselection()
+        if not sel:
+            messagebox.showinfo("Info", "Select a step to insert before.")
+            return
+        idx = sel[0]
+        self._show_step_dialog("Insert Step", insert_index=idx)
+
+    def _edit_custom_step(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
+            return
+        sel = self.custom_steps_listbox.curselection()
+        if not sel:
+            messagebox.showinfo("Info", "Select a step to edit.")
+            return
+        idx = sel[0]
+        if idx < 0 or idx >= len(self.custom_steps):
+            return
+        level, dur = self.custom_steps[idx]
+        self._show_step_dialog("Edit Step", edit_index=idx, level=level, dur=dur)
+
+    def _show_step_dialog(self, title, insert_index=None, edit_index=None, level=None, dur=None):
         dialog = tk.Toplevel(self.root)
-        dialog.title("Add Custom Step")
+        dialog.title(title)
         dialog.geometry("300x160")
         dialog.configure(bg=Theme.PNL)
         dialog.transient(self.root)
@@ -1056,7 +1104,10 @@ class App:
         tk.Label(dialog, text="Level:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
         entry_level = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=10, font=('Segoe UI', 8))
         entry_level.grid(row=0, column=1, padx=5, pady=5)
-        entry_level.insert(0, "0.0")
+        if level is not None:
+            entry_level.insert(0, str(level))
+        else:
+            entry_level.insert(0, "0.0")
         unit_level_var = tk.StringVar(value="A")
         unit_level_combo = ttk.Combobox(dialog, textvariable=unit_level_var, values=["A", "mA", "µA"], state="readonly", width=4, font=('Segoe UI', 8))
         unit_level_combo.grid(row=0, column=2, padx=(2,0), pady=5)
@@ -1065,22 +1116,30 @@ class App:
         tk.Label(dialog, text="Duration (ms):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
         entry_dur = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 8))
         entry_dur.grid(row=1, column=1, padx=5, pady=5)
-        entry_dur.insert(0, "1000")
+        if dur is not None:
+            entry_dur.insert(0, str(dur*1000))
+        else:
+            entry_dur.insert(0, "1000")
 
         def confirm():
             try:
-                level = float(entry_level.get())
+                level_val = float(entry_level.get())
                 dur_ms = float(entry_dur.get())
                 if dur_ms <= 0:
                     raise ValueError("Duration must be positive")
                 # Convert level to Amps
                 unit = unit_level_var.get()
                 if unit == "mA":
-                    level *= 1e-3
+                    level_val *= 1e-3
                 elif unit == "µA":
-                    level *= 1e-6
+                    level_val *= 1e-6
                 dur_s = dur_ms / 1000.0
-                self.custom_steps.append((level, dur_s))
+                if edit_index is not None:
+                    self.custom_steps[edit_index] = (level_val, dur_s)
+                elif insert_index is not None:
+                    self.custom_steps.insert(insert_index, (level_val, dur_s))
+                else:
+                    self.custom_steps.append((level_val, dur_s))
                 self._update_custom_ui()
                 dialog.destroy()
             except ValueError as e:
@@ -1122,6 +1181,49 @@ class App:
         total = sum(dur for _, dur in self.custom_steps)
         self.lbl_custom_period.config(text=f"Total Cycle Period: {total:.3f} s")
         self._on_cycles_changed()
+
+    def _export_custom_pattern(self):
+        if not self.custom_steps:
+            messagebox.showinfo("Info", "No steps to export.")
+            return
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")], title="Export Custom Pattern")
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Level (A)", "Duration (s)"])
+                for level, dur in self.custom_steps:
+                    writer.writerow([level, dur])
+            messagebox.showinfo("Export Successful", f"Pattern exported to:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("Export Error", str(e))
+
+    def _import_custom_pattern(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to import.")
+            return
+        if self.custom_steps:
+            if not messagebox.askyesno("Overwrite", "This will replace the current pattern. Continue?"):
+                return
+        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")], title="Import Custom Pattern")
+        if not file_path:
+            return
+        try:
+            df = pd.read_csv(file_path)
+            # Expect at least two columns: Level and Duration
+            if len(df.columns) < 2:
+                raise ValueError("CSV must have at least two columns: Level (A) and Duration (s)")
+            levels = df.iloc[:, 0].values
+            durs = df.iloc[:, 1].values
+            if len(levels) != len(durs):
+                raise ValueError("Level and Duration columns must have same length.")
+            # Clear and load
+            self.custom_steps = [(float(levels[i]), float(durs[i])) for i in range(len(levels))]
+            self._update_custom_ui()
+            messagebox.showinfo("Import Successful", f"Imported {len(self.custom_steps)} steps from:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("Import Error", str(e))
 
     def _on_cycles_changed(self, event=None):
         """If cycles > 0, compute total time and disable total time entry."""
