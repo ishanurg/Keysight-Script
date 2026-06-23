@@ -600,6 +600,10 @@ class App:
         self.custom_steps = []
         self.custom_locked = False
 
+        # Unit selection for current entries
+        self.unit_min_var = tk.StringVar(value="A")
+        self.unit_max_var = tk.StringVar(value="A")
+
         # Create Qt application instance for preview windows
         self.qt_app = QtWidgets.QApplication.instance()
         if self.qt_app is None:
@@ -633,7 +637,8 @@ class App:
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        left = tk.Frame(body, bg=Theme.PNL, width=320, relief='flat')
+        # Left panel – widened to 400
+        left = tk.Frame(body, bg=Theme.PNL, width=400, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
         tk.Frame(body, bg=Theme.BRD, width=1).pack(side='left', fill='y')
@@ -704,18 +709,27 @@ class App:
         self.dynamic_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.dynamic_params.pack(fill='x', pady=(0,0))
         
-        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
+        # ---- Base/Min Level with unit selector ----
+        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
-        self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
+        self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=8)
         self.ent_min.insert(0, "0.005")
         self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+        self.unit_min_combo = ttk.Combobox(self.dynamic_params, textvariable=self.unit_min_var, values=["A", "mA", "µA"], state="readonly", width=4, font=('Segoe UI', 8))
+        self.unit_min_combo.grid(row=0, column=2, padx=(2,0), pady=1)
+        self.unit_min_combo.set("A")
 
-        self.lbl_max = tk.Label(self.dynamic_params, text="Peak Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
+        # ---- Peak/Max Level with unit selector ----
+        self.lbl_max = tk.Label(self.dynamic_params, text="Peak/Max Level:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
-        self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
+        self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=8)
         self.ent_max.insert(0, "0.040")
         self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
+        self.unit_max_combo = ttk.Combobox(self.dynamic_params, textvariable=self.unit_max_var, values=["A", "mA", "µA"], state="readonly", width=4, font=('Segoe UI', 8))
+        self.unit_max_combo.grid(row=1, column=2, padx=(2,0), pady=1)
+        self.unit_max_combo.set("A")
 
+        # ---- Compliance Limit ----
         self.lbl_cmp = tk.Label(self.dynamic_params, text="Compliance Limit (V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
         self.ent_cmp = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
@@ -833,38 +847,48 @@ class App:
             if "Constant DC" in shape:
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
+                self.unit_max_combo.grid_remove()
                 self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
                 self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.unit_min_combo.grid(row=0, column=2, padx=(2,0), pady=1)
                 self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
                 self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
             elif shape == "Custom Pattern":
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
+                self.unit_max_combo.grid_remove()
                 self.lbl_min.grid_remove()
                 self.ent_min.grid_remove()
+                self.unit_min_combo.grid_remove()
                 self.lbl_cmp.grid(row=0, column=0, sticky='w', pady=1)
                 self.ent_cmp.grid(row=0, column=1, sticky='e', pady=1)
                 self.time_frame_custom.pack(fill='x', after=self.dynamic_params)
             elif shape == "Custom (CSV List)":
                 self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
                 self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
+                self.unit_max_combo.grid(row=1, column=2, padx=(2,0), pady=1)
                 self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
                 self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.unit_min_combo.grid(row=0, column=2, padx=(2,0), pady=1)
                 self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
                 self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
                 self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
             elif shape == "Temple Run":
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
+                self.unit_max_combo.grid_remove()
                 self.lbl_min.grid_remove()
                 self.ent_min.grid_remove()
+                self.unit_min_combo.grid_remove()
                 self.lbl_cmp.grid(row=0, column=0, sticky='w', pady=1)
                 self.ent_cmp.grid(row=0, column=1, sticky='e', pady=1)
             else:
                 self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
                 self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
+                self.unit_max_combo.grid(row=1, column=2, padx=(2,0), pady=1)
                 self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
                 self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.unit_min_combo.grid(row=0, column=2, padx=(2,0), pady=1)
                 self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
                 self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
                 if "Pulse" in shape:
@@ -900,7 +924,7 @@ class App:
         tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 7, 'bold')).pack(side='right', padx=(2,0))
 
         tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 7)).pack(anchor='w')
-        self.off_mode_var = tk.StringVar(value="Turn OFF (Normal)")
+        self.off_mode_var = tk.StringVar(value="Hold Last Level")
         ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Last Level"], state="readonly", font=('Segoe UI', 8)).pack(fill='x', pady=(0,4))
 
         ctrl_btn_frm = tk.Frame(action_frm, bg=Theme.PNL)
@@ -1024,15 +1048,19 @@ class App:
             return
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Custom Step")
-        dialog.geometry("280x150")
+        dialog.geometry("300x160")
         dialog.configure(bg=Theme.PNL)
         dialog.transient(self.root)
         dialog.grab_set()
 
-        tk.Label(dialog, text="Level (A or V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        entry_level = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 8))
+        tk.Label(dialog, text="Level:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        entry_level = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=10, font=('Segoe UI', 8))
         entry_level.grid(row=0, column=1, padx=5, pady=5)
         entry_level.insert(0, "0.0")
+        unit_level_var = tk.StringVar(value="A")
+        unit_level_combo = ttk.Combobox(dialog, textvariable=unit_level_var, values=["A", "mA", "µA"], state="readonly", width=4, font=('Segoe UI', 8))
+        unit_level_combo.grid(row=0, column=2, padx=(2,0), pady=5)
+        unit_level_combo.set("A")
 
         tk.Label(dialog, text="Duration (ms):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
         entry_dur = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 8))
@@ -1045,6 +1073,12 @@ class App:
                 dur_ms = float(entry_dur.get())
                 if dur_ms <= 0:
                     raise ValueError("Duration must be positive")
+                # Convert level to Amps
+                unit = unit_level_var.get()
+                if unit == "mA":
+                    level *= 1e-3
+                elif unit == "µA":
+                    level *= 1e-6
                 dur_s = dur_ms / 1000.0
                 self.custom_steps.append((level, dur_s))
                 self._update_custom_ui()
@@ -1053,7 +1087,7 @@ class App:
                 messagebox.showerror("Invalid Input", str(e))
 
         btn_frame = tk.Frame(dialog, bg=Theme.PNL)
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=2, column=0, columnspan=3, pady=10)
         tk.Button(btn_frame, text="OK", bg=Theme.ACC, fg="white", relief='flat', command=confirm, font=('Segoe UI', 8)).pack(side='left', padx=5)
         tk.Button(btn_frame, text="Cancel", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=dialog.destroy, font=('Segoe UI', 8)).pack(side='left', padx=5)
 
@@ -1143,8 +1177,21 @@ class App:
 
     def _generate_waveform_arrays(self, pts):
         shape = self.shape_var.get()
+        # Read values and convert based on unit
         base = self.safe_float(self.ent_min, 0.005)
+        unit_min = self.unit_min_var.get()
+        if unit_min == "mA":
+            base *= 1e-3
+        elif unit_min == "µA":
+            base *= 1e-6
+
         peak = self.safe_float(self.ent_max, 0.040)
+        unit_max = self.unit_max_var.get()
+        if unit_max == "mA":
+            peak *= 1e-3
+        elif unit_max == "µA":
+            peak *= 1e-6
+
         period = self._get_current_period()
         
         if period <= 0: period = 1.0
@@ -1217,7 +1264,9 @@ class App:
             return
         sampling_rate = self.safe_float(self.ent_sampling, 100)
         if sampling_rate <= 0: sampling_rate = 100
+        # Cap sampling rate at 1000
         sampling_rate = min(sampling_rate, 1000)
+
         pts = int(sampling_rate * period)
         if pts < 2: pts = 2
         if pts > 5000: pts = 5000
@@ -1439,8 +1488,9 @@ class App:
             
             sampling_rate = self.safe_float(self.ent_sampling, 100)
             if sampling_rate <= 0: sampling_rate = 100
+            # Cap sampling rate at 1000
             sampling_rate = min(sampling_rate, 1000)
-
+            
             period = self._get_current_period()
             if period <= 0: period = 1.0
             pts = int(sampling_rate * period)
