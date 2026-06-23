@@ -103,7 +103,7 @@ class ChartPropertiesDialog(tk.Toplevel):
     def __init__(self, parent, chart_obj, chart_key, callback):
         super().__init__(parent)
         self.title(f"Chart Properties - {chart_obj.title}")
-        self.geometry("450x550") # Scaled Down
+        self.geometry("450x550")
         self.configure(bg=Theme.BG)
         self.transient(parent)
         self.grab_set()
@@ -568,7 +568,6 @@ class App:
             
         self.root.title("Keysight B2910CL Precision Control Dashboard")
         self.root.configure(bg=Theme.BG)
-        # Scaled Down by 25% from 1400x850
         self.root.geometry("1050x680")
         self.root.minsize(900, 550)
 
@@ -597,6 +596,10 @@ class App:
         self.btn_layout_smu = None
         self.btn_layout_ana = None
 
+        # Custom pattern steps: list of (level, duration_seconds)
+        self.custom_steps = []
+        self.custom_locked = False
+
         self._build_ui_shell()
         self._rebuild_charts()
         
@@ -615,21 +618,19 @@ class App:
         tk.Frame(self.root, bg=Theme.BRD, height=1).pack(fill='x', side='top')
         tb.pack_propagate(False)
 
-        tk.Label(tb, text='B2910CL MASTER SYSTEM', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold')).pack(side='left', padx=10)
+        tk.Label(tb, text='B2910CL MASTER SYSTEM', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 10, 'bold')).pack(side='left', padx=10)
         tk.Frame(tb, bg=Theme.BRD, width=1).pack(side='left', fill='y', pady=6)
-        self.lbl_status = tk.Label(tb, text='Hardware Offline', bg=Theme.PNL, fg=Theme.ERR, font=('Segoe UI', 9, 'bold'))
+        self.lbl_status = tk.Label(tb, text='Hardware Offline', bg=Theme.PNL, fg=Theme.ERR, font=('Segoe UI', 8, 'bold'))
         self.lbl_status.pack(side='left', padx=10)
 
         body = tk.Frame(self.root, bg=Theme.BG)
         body.pack(fill='both', expand=True)
 
-        # Scaled Left Panel to 320px
         left = tk.Frame(body, bg=Theme.PNL, width=320, relief='flat')
         left.pack(side='left', fill='y')
         left.pack_propagate(False)
         tk.Frame(body, bg=Theme.BRD, width=1).pack(side='left', fill='y')
 
-        # CRITICAL PACKING FIX: Pack bottom first to prevent push-off
         left_bottom = tk.Frame(left, bg=Theme.PNL)
         left_bottom.pack(side='bottom', fill='x')
 
@@ -639,7 +640,7 @@ class App:
         style = ttk.Style()
         style.theme_use('default')
         style.configure('Left.TNotebook', background=Theme.PNL, borderwidth=0)
-        style.configure('Left.TNotebook.Tab', font=('Segoe UI', 9, 'bold'), padding=[8, 4], background=Theme.PNL2, foreground=Theme.DIM)
+        style.configure('Left.TNotebook.Tab', font=('Segoe UI', 8, 'bold'), padding=[6, 3], background=Theme.PNL2, foreground=Theme.DIM)
         style.map('Left.TNotebook.Tab', background=[('selected', Theme.PNL)], foreground=[('selected', Theme.ACC)])
 
         self.nb_left = ttk.Notebook(left_top, style='Left.TNotebook')
@@ -656,58 +657,61 @@ class App:
         def sec(parent, title):
             tk.Frame(parent, bg=Theme.SEP, height=1).pack(fill='x')
             f = tk.Frame(parent, bg=Theme.PNL)
-            f.pack(fill='x', padx=10, pady=5)
-            tk.Label(f, text=title, bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 8, 'bold')).pack(anchor='w', pady=(1, 3))
+            f.pack(fill='x', padx=10, pady=4)
+            tk.Label(f, text=title, bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 7, 'bold')).pack(anchor='w', pady=(1, 2))
             return f
 
         smu_inner = tab_smu.inner
         conn_sec = sec(smu_inner, "HARDWARE CONNECTION")
-        self.visa_combo = ttk.Combobox(conn_sec, state='readonly', font=('Segoe UI', 9))
+        self.visa_combo = ttk.Combobox(conn_sec, state='readonly', font=('Segoe UI', 8))
         self.visa_combo.pack(fill='x', pady=2)
         btn_frm = tk.Frame(conn_sec, bg=Theme.PNL)
         btn_frm.pack(fill='x', pady=2)
-        tk.Button(btn_frm, text="Manual Scan", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 8, 'bold'), command=self._scan_visa).pack(side='left', fill='x', expand=True, padx=(0,2))
-        self.btn_conn = tk.Button(btn_frm, text="Connect Hardware", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 8, 'bold'), command=self._connect_smu)
+        tk.Button(btn_frm, text="Manual Scan", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._scan_visa).pack(side='left', fill='x', expand=True, padx=(0,2))
+        self.btn_conn = tk.Button(btn_frm, text="Connect Hardware", bg=Theme.PNL2, fg=Theme.FG, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._connect_smu)
         self.btn_conn.pack(side='right', fill='x', expand=True, padx=(2,0))
 
         cfg_sec = sec(smu_inner, "TEST CONFIGURATION")
         
         self.src_mode_var = tk.StringVar(value="Current (A)")
-        tk.Label(cfg_sec, text="Source Mode:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
-        cb_src = ttk.Combobox(cfg_sec, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)"], state="readonly", font=('Segoe UI', 9))
-        cb_src.pack(fill='x', pady=(0,4))
+        tk.Label(cfg_sec, text="Source Mode:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
+        cb_src = ttk.Combobox(cfg_sec, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)"], state="readonly", font=('Segoe UI', 8))
+        cb_src.pack(fill='x', pady=(0,3))
         
         self.msr_mode_var = tk.StringVar(value="Auto (Opposite)")
-        tk.Label(cfg_sec, text="Primary Measurement Display:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
-        cb_msr = ttk.Combobox(cfg_sec, textvariable=self.msr_mode_var, values=["Auto (Opposite)", "Voltage (V)", "Current (A)", "Resistance (Ω)", "Power (W)"], state="readonly", font=('Segoe UI', 9))
-        cb_msr.pack(fill='x', pady=(0,4))
+        tk.Label(cfg_sec, text="Primary Measurement Display:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
+        cb_msr = ttk.Combobox(cfg_sec, textvariable=self.msr_mode_var, values=["Auto (Opposite)", "Voltage (V)", "Current (A)", "Resistance (Ω)", "Power (W)"], state="readonly", font=('Segoe UI', 8))
+        cb_msr.pack(fill='x', pady=(0,3))
 
+        # Waveform shape
         self.shape_var = tk.StringVar(value="Temple Run")
-        tk.Label(cfg_sec, text="Waveform Shape:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).pack(anchor='w')
+        tk.Label(cfg_sec, text="Waveform Shape:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
         
         shape_frm = tk.Frame(cfg_sec, bg=Theme.PNL)
-        shape_frm.pack(fill='x', pady=(0,4))
-        cb_shape = ttk.Combobox(shape_frm, textvariable=self.shape_var, values=["Constant DC", "Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Temple Run", "Temple Run (General)", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 9))
+        shape_frm.pack(fill='x', pady=(0,2))
+        cb_shape = ttk.Combobox(shape_frm, textvariable=self.shape_var, values=["Constant DC", "Sine Wave", "Cosine Wave", "Square (Pulse)", "Triangle", "Staircase", "Temple Run", "Custom Pattern", "Custom (CSV List)"], state="readonly", font=('Segoe UI', 8))
         cb_shape.pack(side='left', fill='x', expand=True)
+        # Preview button
+        tk.Button(shape_frm, text="Preview", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._preview_waveform).pack(side='right', padx=(4,0))
 
         self.dynamic_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.dynamic_params.pack(fill='x', pady=(0,0))
         
-        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9))
+        self.lbl_min = tk.Label(self.dynamic_params, text="Base/Min Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
-        self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10)
+        self.ent_min = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
         self.ent_min.insert(0, "0.005")
         self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
 
-        self.lbl_max = tk.Label(self.dynamic_params, text="Peak Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9))
+        self.lbl_max = tk.Label(self.dynamic_params, text="Peak Level (A):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
-        self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10)
+        self.ent_max = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
         self.ent_max.insert(0, "0.040")
         self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
 
-        self.lbl_cmp = tk.Label(self.dynamic_params, text="Compliance Limit (V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9))
+        self.lbl_cmp = tk.Label(self.dynamic_params, text="Compliance Limit (V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
-        self.ent_cmp = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10)
+        self.ent_cmp = tk.Entry(self.dynamic_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
         self.ent_cmp.insert(0, "10.0")
         self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
         
@@ -726,171 +730,192 @@ class App:
             
         self.src_mode_var.trace_add('write', _update_units)
         
+        # Time frames for different shapes
         self.time_frame_std = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.time_frame_pls = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.time_frame_csv = tk.Frame(cfg_sec, bg=Theme.PNL)
-        self.time_frame_temple = tk.Frame(cfg_sec, bg=Theme.PNL)
+        self.time_frame_custom = tk.Frame(cfg_sec, bg=Theme.PNL)
         
-        tk.Label(self.time_frame_std, text="Cycle Period (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=1)
-        self.ent_per = tk.Entry(self.time_frame_std, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10)
+        tk.Label(self.time_frame_std, text="Cycle Period (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, sticky='w', pady=1)
+        self.ent_per = tk.Entry(self.time_frame_std, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
         self.ent_per.insert(0, "4.0")
         self.ent_per.grid(row=0, column=1, sticky='e', pady=1)
         
         self.pulse_base_var = tk.StringVar(value="2.0")
         self.pulse_peak_var = tk.StringVar(value="2.0")
-        tk.Label(self.time_frame_pls, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=1)
-        tk.Entry(self.time_frame_pls, textvariable=self.pulse_base_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10).grid(row=0, column=1, sticky='e', pady=1)
-        tk.Label(self.time_frame_pls, text="Time at Peak (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=1)
-        tk.Entry(self.time_frame_pls, textvariable=self.pulse_peak_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10).grid(row=1, column=1, sticky='e', pady=1)
-        self.lbl_duty = tk.Label(self.time_frame_pls, text="Duty: 50.0% | Period: 4.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 8, 'bold'))
+        tk.Label(self.time_frame_pls, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, sticky='w', pady=1)
+        tk.Entry(self.time_frame_pls, textvariable=self.pulse_base_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10).grid(row=0, column=1, sticky='e', pady=1)
+        tk.Label(self.time_frame_pls, text="Time at Peak (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=1, column=0, sticky='w', pady=1)
+        tk.Entry(self.time_frame_pls, textvariable=self.pulse_peak_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10).grid(row=1, column=1, sticky='e', pady=1)
+        self.lbl_duty = tk.Label(self.time_frame_pls, text="Duty: 50.0% | Period: 4.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 7, 'bold'))
         self.lbl_duty.grid(row=2, column=0, columnspan=2, sticky='e', pady=1)
         
-        self.tr_base_time_var = tk.StringVar(value="5.0")
-        self.tr_step_time_var = tk.StringVar(value="1.0")
-        self.tr_step_size_var = tk.StringVar(value="0.010")
-        tk.Label(self.time_frame_temple, text="Time at Base (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=1)
-        tk.Entry(self.time_frame_temple, textvariable=self.tr_base_time_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10).grid(row=0, column=1, sticky='e', pady=1)
-        tk.Label(self.time_frame_temple, text="Time per Step (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=1)
-        tk.Entry(self.time_frame_temple, textvariable=self.tr_step_time_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10).grid(row=1, column=1, sticky='e', pady=1)
-        tk.Label(self.time_frame_temple, text="Step Size (A/V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=2, column=0, sticky='w', pady=1)
-        tk.Entry(self.time_frame_temple, textvariable=self.tr_step_size_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=10).grid(row=2, column=1, sticky='e', pady=1)
-        self.lbl_tr_period = tk.Label(self.time_frame_temple, text="Total Cycle Period: 0.0s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 8, 'bold'))
-        self.lbl_tr_period.grid(row=3, column=0, columnspan=2, sticky='e', pady=1)
+        # ---- Custom Pattern Builder (with Lock) ----
+        custom_frame = self.time_frame_custom
 
-        tk.Button(self.time_frame_csv, text="Browse Custom CSV...", bg=Theme.PNL2, fg=Theme.ACC, font=('Segoe UI', 8, 'bold'), relief='flat', command=self._load_custom_csv).pack(fill='x', pady=1)
-        self.lbl_custom = tk.Label(self.time_frame_csv, text="No File Loaded.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 8))
+        # Step listbox
+        self.custom_steps_listbox = tk.Listbox(custom_frame, bg=Theme.PNL2, fg=Theme.FG, height=5, font=('Segoe UI', 8))
+        self.custom_steps_listbox.pack(fill='x', pady=2)
+        # Buttons row
+        btn_row = tk.Frame(custom_frame, bg=Theme.PNL)
+        btn_row.pack(fill='x', pady=1)
+        self.btn_add_step = tk.Button(btn_row, text="Add Step (+)", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._add_custom_step)
+        self.btn_add_step.pack(side='left', fill='x', expand=True, padx=(0,2))
+        self.btn_remove_step = tk.Button(btn_row, text="Remove Sel. (-)", bg=Theme.PNL2, fg='#dc2626', relief='flat', font=('Segoe UI', 7, 'bold'), command=self._remove_custom_step)
+        self.btn_remove_step.pack(side='left', fill='x', expand=True, padx=(2,2))
+        self.btn_clear_steps = tk.Button(btn_row, text="Clear All", bg=Theme.PNL2, fg=Theme.DIM, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._clear_custom_steps)
+        self.btn_clear_steps.pack(side='left', fill='x', expand=True, padx=(2,0))
+        # Lock/Unlock button
+        self.btn_lock_custom = tk.Button(custom_frame, text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC, relief='flat', font=('Segoe UI', 7, 'bold'), command=self._toggle_custom_lock)
+        self.btn_lock_custom.pack(fill='x', pady=1)
+
+        self.lbl_custom_period = tk.Label(custom_frame, text="Total Cycle Period: 0.0 s", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 8, 'bold'))
+        self.lbl_custom_period.pack(anchor='e', pady=2)
+
+        # --- CSV custom ---
+        tk.Button(self.time_frame_csv, text="Browse Custom CSV...", bg=Theme.PNL2, fg=Theme.ACC, font=('Segoe UI', 7, 'bold'), relief='flat', command=self._load_custom_csv).pack(fill='x', pady=1)
+        self.lbl_custom = tk.Label(self.time_frame_csv, text="No File Loaded.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 7))
         self.lbl_custom.pack(anchor='w')
 
+        # Bottom parameters: Sampling rate, Cycles, Total Time, Infinite
         self.bottom_params = tk.Frame(cfg_sec, bg=Theme.PNL)
         self.bottom_params.pack(fill='x', pady=(0,0))
         
-        self.period_tracker_var = tk.StringVar(value="4.0")
-        self.ent_per.config(textvariable=self.period_tracker_var)
-        
-        tk.Label(self.bottom_params, text="Points/Cycle (Res):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=1)
-        pts_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
-        pts_frm.grid(row=0, column=1, sticky='e', pady=1)
-        self.ent_pts = tk.Entry(pts_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=6)
-        self.ent_pts.insert(0, "360")
-        self.ent_pts.pack(side='left')
-        self.max_pts_var = tk.BooleanVar(value=False)
-        chk_max_pts = tk.Checkbutton(pts_frm, text="MAX", variable=self.max_pts_var, bg=Theme.PNL, fg=Theme.ACC, selectcolor=Theme.PNL2, font=('Segoe UI', 8, 'bold'))
-        chk_max_pts.pack(side='left', padx=(2,0))
-        
-        tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=1)
+        # Sampling Rate (universal)
+        tk.Label(self.bottom_params, text="Sampling Rate (samples/s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, sticky='w', pady=1)
+        self.ent_sampling = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
+        self.ent_sampling.insert(0, "100")
+        self.ent_sampling.grid(row=0, column=1, sticky='e', pady=1)
+
+        # Number of Cycles
+        tk.Label(self.bottom_params, text="Cycles (0=use Total Time):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=1, column=0, sticky='w', pady=1)
+        self.ent_cycles = tk.Entry(self.bottom_params, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=10)
+        self.ent_cycles.insert(0, "0")
+        self.ent_cycles.grid(row=1, column=1, sticky='e', pady=1)
+        self.ent_cycles.bind("<KeyRelease>", self._on_cycles_changed)
+
+        # Total Test Time (with Infinite checkbox)
+        tk.Label(self.bottom_params, text="Total Test Time (s):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=2, column=0, sticky='w', pady=1)
         time_entry_frm = tk.Frame(self.bottom_params, bg=Theme.PNL)
-        time_entry_frm.grid(row=1, column=1, sticky='e', pady=1)
-        self.ent_tot = tk.Entry(time_entry_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 9), width=6)
+        time_entry_frm.grid(row=2, column=1, sticky='e', pady=1)
+        self.ent_tot = tk.Entry(time_entry_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8), width=6)
         self.ent_tot.insert(0, "14.0")
         self.ent_tot.pack(side='left')
         self.inf_run_var = tk.BooleanVar(value=False)
-        chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 9, 'bold'))
+        chk_inf = tk.Checkbutton(time_entry_frm, text="∞", variable=self.inf_run_var, bg=Theme.PNL, fg=Theme.C_HL, selectcolor=Theme.PNL2, font=('Segoe UI', 8, 'bold'))
         chk_inf.pack(side='left', padx=(2,0))
         
-        def _on_max_pts(*args):
-            if self.max_pts_var.get():
-                try: per = float(self.period_tracker_var.get())
-                except: per = 1.0
-                max_allowed = int(per / 1e-5)
-                max_allowed = min(max_allowed, 100000) 
-                self.ent_pts.config(state='normal')
-                self.ent_pts.delete(0, tk.END)
-                self.ent_pts.insert(0, str(max_allowed))
-                self.ent_pts.config(state='disabled')
-            else:
-                self.ent_pts.config(state='normal')
-        self.max_pts_var.trace_add('write', _on_max_pts)
-        self.period_tracker_var.trace_add('write', _on_max_pts)
-        
         def _on_inf_run_toggle(*args):
-            if self.inf_run_var.get(): self.ent_tot.config(state='disabled')
-            else: self.ent_tot.config(state='normal')
+            if self.inf_run_var.get():
+                self.ent_tot.config(state='disabled')
+                self.ent_cycles.config(state='disabled')
+            else:
+                self.ent_tot.config(state='normal')
+                self.ent_cycles.config(state='normal')
+                self._on_cycles_changed()  # re-evaluate
         self.inf_run_var.trace_add('write', _on_inf_run_toggle)
 
+        # Swap UI based on shape
         def _swap_ui(*args):
             shape = self.shape_var.get()
             self.time_frame_std.pack_forget()
             self.time_frame_pls.pack_forget()
             self.time_frame_csv.pack_forget()
-            self.time_frame_temple.pack_forget()
-            
-            self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
-            self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
-            self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
-            self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+            self.time_frame_custom.pack_forget()
             
             if "Constant DC" in shape:
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
+                self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
+                self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
+                self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
+            elif shape == "Custom Pattern":
+                self.lbl_max.grid_remove()
+                self.ent_max.grid_remove()
+                self.lbl_min.grid_remove()
+                self.ent_min.grid_remove()
+                self.lbl_cmp.grid(row=0, column=0, sticky='w', pady=1)
+                self.ent_cmp.grid(row=0, column=1, sticky='e', pady=1)
+                self.time_frame_custom.pack(fill='x', after=self.dynamic_params)
+            elif shape == "Custom (CSV List)":
+                self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
+                self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
+                self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
+                self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
+                self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
+                self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
             elif shape == "Temple Run":
                 self.lbl_max.grid_remove()
                 self.ent_max.grid_remove()
                 self.lbl_min.grid_remove()
                 self.ent_min.grid_remove()
-                
-            if "Pulse" in shape: self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
-            elif "Custom" in shape: self.time_frame_csv.pack(fill='x', after=self.dynamic_params)
-            elif shape == "Temple Run (General)": self.time_frame_temple.pack(fill='x', after=self.dynamic_params)
-            elif shape in ["Constant DC", "Temple Run"]: pass 
-            else: self.time_frame_std.pack(fill='x', after=self.dynamic_params)
-            
+                self.lbl_cmp.grid(row=0, column=0, sticky='w', pady=1)
+                self.ent_cmp.grid(row=0, column=1, sticky='e', pady=1)
+            else:
+                self.lbl_max.grid(row=1, column=0, sticky='w', pady=1)
+                self.ent_max.grid(row=1, column=1, sticky='e', pady=1)
+                self.lbl_min.grid(row=0, column=0, sticky='w', pady=1)
+                self.ent_min.grid(row=0, column=1, sticky='e', pady=1)
+                self.lbl_cmp.grid(row=2, column=0, sticky='w', pady=1)
+                self.ent_cmp.grid(row=2, column=1, sticky='e', pady=1)
+                if "Pulse" in shape:
+                    self.time_frame_pls.pack(fill='x', after=self.dynamic_params)
+                else:
+                    self.time_frame_std.pack(fill='x', after=self.dynamic_params)
             self._update_dynamic_ui()
             
         self.shape_var.trace_add('write', _swap_ui)
         _swap_ui()
 
-        # PREVIEW GRAPH REMOVED. Only the Viewport controls remain below.
+        # Viewport control
         sys_sec_smu = sec(smu_inner, "VIEWPORT CONTROL")
-        self.btn_layout_smu = tk.Button(sys_sec_smu, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
+        self.btn_layout_smu = tk.Button(sys_sec_smu, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
         self.btn_layout_smu.pack(fill='x', ipady=2, pady=2)
-        tk.Button(sys_sec_smu, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=2, pady=2)
+        tk.Button(sys_sec_smu, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=2, pady=2)
 
-        # Dynamic Handlers Update
         self.pulse_base_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
         self.pulse_peak_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
-        self.tr_base_time_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
-        self.tr_step_time_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
-        self.tr_step_size_var.trace_add('write', lambda *a: self.root.after(200, self._update_dynamic_ui))
-        self.root.after(500, _swap_ui)
 
         # ==========================================
-        # FIXED BOTTOM ACTION PANEL (Packed early)
+        # FIXED BOTTOM ACTION PANEL
         # ==========================================
         tk.Frame(left_bottom, bg=Theme.SEP, height=1).pack(fill='x')
         action_frm = tk.Frame(left_bottom, bg=Theme.PNL)
         action_frm.pack(fill='x', padx=10, pady=5)
 
         self.save_var = tk.StringVar(value=self.startup_path)
-        tk.Label(action_frm, text="Save Data To:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8, 'bold')).pack(anchor='w')
+        tk.Label(action_frm, text="Save Data To:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 7, 'bold')).pack(anchor='w')
         sv_frm = tk.Frame(action_frm, bg=Theme.PNL)
         sv_frm.pack(fill='x', pady=(0, 2))
-        tk.Entry(sv_frm, textvariable=self.save_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 8)).pack(side='left', fill='x', expand=True)
-        tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 8, 'bold')).pack(side='right', padx=(2,0))
+        tk.Entry(sv_frm, textvariable=self.save_var, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Segoe UI', 7)).pack(side='left', fill='x', expand=True)
+        tk.Button(sv_frm, text="Browse", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=self._browse_save, font=('Segoe UI', 7, 'bold')).pack(side='right', padx=(2,0))
 
-        tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
+        tk.Label(action_frm, text="Post-Test Output State:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 7)).pack(anchor='w')
         self.off_mode_var = tk.StringVar(value="Hold Last Level")
-        ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Last Level"], state="readonly", font=('Segoe UI', 9)).pack(fill='x', pady=(0,4))
+        ttk.Combobox(action_frm, textvariable=self.off_mode_var, values=["Turn OFF (Normal)", "Turn OFF (High-Z)", "Hold Last Level"], state="readonly", font=('Segoe UI', 8)).pack(fill='x', pady=(0,4))
 
         ctrl_btn_frm = tk.Frame(action_frm, bg=Theme.PNL)
         ctrl_btn_frm.pack(fill='x', pady=2)
         
-        self.btn_start = tk.Button(ctrl_btn_frm, text="▶ START", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 10, 'bold'), relief='flat', command=self._start_test)
+        self.btn_start = tk.Button(ctrl_btn_frm, text="▶ START", bg=Theme.ACC, fg="#ffffff", font=('Segoe UI', 9, 'bold'), relief='flat', command=self._start_test)
         self.btn_start.pack(side='left', fill='x', expand=True, ipady=4, padx=(0, 3))
         
-        self.btn_stop = tk.Button(ctrl_btn_frm, text="⏹ STOP", bg=Theme.ERR, fg="#ffffff", font=('Segoe UI', 10, 'bold'), relief='flat', command=self._stop_test)
+        self.btn_stop = tk.Button(ctrl_btn_frm, text="⏹ STOP", bg=Theme.ERR, fg="#ffffff", font=('Segoe UI', 9, 'bold'), relief='flat', command=self._stop_test)
         self.btn_stop.pack(side='right', fill='x', expand=True, ipady=4, padx=(3, 0))
 
         # ==========================================
         # TAB 2: ANALYTICS 
         # ==========================================
         ds_sec = sec(tab_ana, "DATA SOURCE")
-        tk.Button(ds_sec, text='📂  Load Offline CSV', bg=Theme.PNL2, fg=Theme.ACC, relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._browse_and_load_csv).pack(fill='x', ipady=3, pady=2)
-        self.line_registry_box = tk.Listbox(ds_sec, height=5, bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 9), selectmode='single', highlightthickness=0, bd=0)
+        tk.Button(ds_sec, text='📂  Load Offline CSV', bg=Theme.PNL2, fg=Theme.ACC, relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._browse_and_load_csv).pack(fill='x', ipady=3, pady=2)
+        self.line_registry_box = tk.Listbox(ds_sec, height=5, bg=Theme.PNL2, fg=Theme.FG, font=('Segoe UI', 8), selectmode='single', highlightthickness=0, bd=0)
         self.line_registry_box.pack(fill='x', pady=2)
         self.listbox_tooltip = ListboxTooltip(self.line_registry_box, lambda idx: self.global_datasets.get(self.registry_keys[idx]) if idx < len(self.registry_keys) else None)
         self.line_registry_box.bind('<<ListboxSelect>>', self._on_listbox_select)
         
-        self.context_menu = tk.Menu(self.root, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 9))
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8))
         self.context_menu.add_command(label="⚙ Re-configure CSV Map", command=self._reconfigure_selected_line)
         self.context_menu.add_command(label="👁 Toggle Visibility", command=self._toggle_visibility)
         self.context_menu.add_separator()
@@ -901,37 +926,37 @@ class App:
 
         btn_frm_a = tk.Frame(ds_sec, bg=Theme.PNL)
         btn_frm_a.pack(fill='x', pady=1)
-        tk.Button(btn_frm_a, text='👁 Toggle Vis', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._toggle_visibility).pack(side='left', fill='x', expand=True, padx=(0, 2))
-        tk.Button(btn_frm_a, text='✕ Remove', bg='#fef2f2', fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._purge_selected_line).pack(side='right', fill='x', expand=True, padx=(2, 0))
+        tk.Button(btn_frm_a, text='👁 Toggle Vis', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 7, 'bold'), cursor='hand2', command=self._toggle_visibility).pack(side='left', fill='x', expand=True, padx=(0, 2))
+        tk.Button(btn_frm_a, text='✕ Remove', bg='#fef2f2', fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 7, 'bold'), cursor='hand2', command=self._purge_selected_line).pack(side='right', fill='x', expand=True, padx=(2, 0))
 
         lay_sec = sec(tab_ana, "LAYOUT & VIEWPORT")
-        self.btn_layout_ana = tk.Button(lay_sec, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
+        self.btn_layout_ana = tk.Button(lay_sec, text='🗖  Split to Grid View', bg=Theme.PNL2, fg=Theme.FG, state='disabled', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._toggle_layout_mode)
         self.btn_layout_ana.pack(fill='x', ipady=3, pady=2)
-        tk.Button(lay_sec, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=3, pady=2)
+        tk.Button(lay_sec, text='↺  Auto-Fit Graphics', bg='#fff7ed', fg='#c2410c', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._reset_chart_bounds).pack(fill='x', ipady=3, pady=2)
 
         math_sec = sec(tab_ana, "CALCULUS TOOLS")
         self.math_target_var = tk.StringVar()
-        self.math_combo = ttk.Combobox(math_sec, textvariable=self.math_target_var, state='readonly', font=('Segoe UI', 9))
+        self.math_combo = ttk.Combobox(math_sec, textvariable=self.math_target_var, state='readonly', font=('Segoe UI', 8))
         self.math_combo.pack(fill='x', pady=2)
-        tk.Button(math_sec, text='⚡ Differentiation (Slope)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 9), cursor='hand2', command=self._run_derivative_pipeline).pack(fill='x', ipady=2, pady=2)
-        tk.Button(math_sec, text='∫ Integration (Area)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 9), cursor='hand2', command=self._run_integral_pipeline).pack(fill='x', ipady=2, pady=2)
-        tk.Button(math_sec, text='✕ Clear Math Traces', bg=Theme.PNL2, fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 9, 'bold'), cursor='hand2', command=self._clear_math_traces).pack(fill='x', pady=2)
+        tk.Button(math_sec, text='⚡ Differentiation (Slope)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 8), cursor='hand2', command=self._run_derivative_pipeline).pack(fill='x', ipady=2, pady=2)
+        tk.Button(math_sec, text='∫ Integration (Area)', bg=Theme.PNL2, fg=Theme.FG, relief='flat', bd=0, font=('Segoe UI', 8), cursor='hand2', command=self._run_integral_pipeline).pack(fill='x', ipady=2, pady=2)
+        tk.Button(math_sec, text='✕ Clear Math Traces', bg=Theme.PNL2, fg='#dc2626', relief='flat', bd=0, font=('Segoe UI', 8, 'bold'), cursor='hand2', command=self._clear_math_traces).pack(fill='x', pady=2)
 
         # ==========================================
         # TAB 3: SCPI TERMINAL
         # ==========================================
         scpi_sec = sec(tab_scpi, "RAW HARDWARE COMMUNICATION")
-        tk.Label(scpi_sec, text="Send custom SCPI commands directly.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 8)).pack(anchor='w', pady=(0,5))
+        tk.Label(scpi_sec, text="Send custom SCPI commands directly.", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 7)).pack(anchor='w', pady=(0,5))
         
-        self.txt_term = tk.Text(scpi_sec, bg=Theme.PNL2, fg=Theme.FG, font=('Consolas', 9), height=15)
+        self.txt_term = tk.Text(scpi_sec, bg=Theme.PNL2, fg=Theme.FG, font=('Consolas', 8), height=15)
         self.txt_term.pack(fill='x', pady=5)
         
         cmd_frm = tk.Frame(scpi_sec, bg=Theme.PNL)
         cmd_frm.pack(fill='x', pady=5)
-        self.ent_cmd = tk.Entry(cmd_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Consolas', 10))
+        self.ent_cmd = tk.Entry(cmd_frm, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, font=('Consolas', 9))
         self.ent_cmd.pack(side='left', fill='x', expand=True)
         self.ent_cmd.bind("<Return>", lambda e: self._send_scpi())
-        tk.Button(cmd_frm, text="SEND", bg=Theme.ACC, fg="#ffffff", relief='flat', font=('Segoe UI', 8, 'bold'), command=self._send_scpi).pack(side='right', padx=(5,0))
+        tk.Button(cmd_frm, text="SEND", bg=Theme.ACC, fg="#ffffff", relief='flat', font=('Segoe UI', 7, 'bold'), command=self._send_scpi).pack(side='right', padx=(5,0))
 
         # -- RIGHT PANEL (Graph) --
         right = tk.Frame(body, bg=Theme.BG)
@@ -940,10 +965,10 @@ class App:
         self.timer_frame = tk.Frame(right, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.SEP)
         self.timer_frame.pack(fill='x', side='top', pady=(0, 6))
         
-        self.lbl_exp_status = tk.Label(self.timer_frame, text="EXPERIMENT IDLE", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 11, 'bold'))
+        self.lbl_exp_status = tk.Label(self.timer_frame, text="EXPERIMENT IDLE", bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 10, 'bold'))
         self.lbl_exp_status.pack(side='left', padx=10, pady=6)
         
-        self.lbl_exp_time = tk.Label(self.timer_frame, text="Time Remaining: --:--", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
+        self.lbl_exp_time = tk.Label(self.timer_frame, text="Time Remaining: --:--", bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 10, 'bold'))
         self.lbl_exp_time.pack(side='right', padx=10, pady=6)
 
         stats_frame = tk.Frame(right, bg=Theme.BG)
@@ -954,8 +979,8 @@ class App:
         for m_key, label_text in ordered_metrics:
             cell = tk.Frame(stats_frame, bg=Theme.PNL, highlightthickness=1, highlightbackground=Theme.SEP)
             cell.pack(side='left', fill='x', expand=True, padx=2)
-            tk.Label(cell, text=label_text.upper(), bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 8, 'bold')).pack(anchor='w', padx=6, pady=(4, 0))
-            val_lbl = tk.Label(cell, text='--', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 11, 'bold'))
+            tk.Label(cell, text=label_text.upper(), bg=Theme.PNL, fg=Theme.DIM, font=('Segoe UI', 7, 'bold')).pack(anchor='w', padx=6, pady=(4, 0))
+            val_lbl = tk.Label(cell, text='--', bg=Theme.PNL, fg=Theme.ACC, font=('Segoe UI', 9, 'bold'))
             val_lbl.pack(anchor='w', padx=6, pady=(0, 4))
             self.metric_boxes[m_key] = val_lbl
 
@@ -968,6 +993,115 @@ class App:
         self.chart_container = tk.Frame(chart_tab_panel, bg=Theme.BG)
         self.chart_container.pack(fill='both', expand=True, padx=4, pady=4)
 
+    # ------------------------------------------------------------------
+    # Custom Pattern Step Management (with Lock)
+    # ------------------------------------------------------------------
+    def _toggle_custom_lock(self):
+        self.custom_locked = not self.custom_locked
+        if self.custom_locked:
+            self.btn_lock_custom.config(text="🔓 Unlock Pattern", bg='#fef2f2', fg='#dc2626')
+            self.btn_add_step.config(state='disabled')
+            self.btn_remove_step.config(state='disabled')
+            self.btn_clear_steps.config(state='disabled')
+            self.custom_steps_listbox.config(state='disabled')
+        else:
+            self.btn_lock_custom.config(text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC)
+            self.btn_add_step.config(state='normal')
+            self.btn_remove_step.config(state='normal')
+            self.btn_clear_steps.config(state='normal')
+            self.custom_steps_listbox.config(state='normal')
+
+    def _add_custom_step(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Custom Step")
+        dialog.geometry("280x150")
+        dialog.configure(bg=Theme.PNL)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Level (A or V):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        entry_level = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 8))
+        entry_level.grid(row=0, column=1, padx=5, pady=5)
+        entry_level.insert(0, "0.0")
+
+        tk.Label(dialog, text="Duration (ms):", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).grid(row=1, column=0, padx=5, pady=5, sticky='e')
+        entry_dur = tk.Entry(dialog, bg=Theme.PNL2, fg=Theme.FG, insertbackground=Theme.FG, width=15, font=('Segoe UI', 8))
+        entry_dur.grid(row=1, column=1, padx=5, pady=5)
+        entry_dur.insert(0, "1000")
+
+        def confirm():
+            try:
+                level = float(entry_level.get())
+                dur_ms = float(entry_dur.get())
+                if dur_ms <= 0:
+                    raise ValueError("Duration must be positive")
+                dur_s = dur_ms / 1000.0
+                self.custom_steps.append((level, dur_s))
+                self._update_custom_ui()
+                dialog.destroy()
+            except ValueError as e:
+                messagebox.showerror("Invalid Input", str(e))
+
+        btn_frame = tk.Frame(dialog, bg=Theme.PNL)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        tk.Button(btn_frame, text="OK", bg=Theme.ACC, fg="white", relief='flat', command=confirm, font=('Segoe UI', 8)).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Cancel", bg=Theme.PNL2, fg=Theme.FG, relief='flat', command=dialog.destroy, font=('Segoe UI', 8)).pack(side='left', padx=5)
+
+        entry_level.focus_set()
+        dialog.bind('<Return>', lambda e: confirm())
+
+    def _remove_custom_step(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
+            return
+        sel = self.custom_steps_listbox.curselection()
+        if not sel:
+            messagebox.showinfo("Info", "Please select a step to remove.")
+            return
+        idx = sel[0]
+        if 0 <= idx < len(self.custom_steps):
+            del self.custom_steps[idx]
+            self._update_custom_ui()
+
+    def _clear_custom_steps(self):
+        if self.custom_locked:
+            messagebox.showinfo("Locked", "Pattern is locked. Unlock to edit.")
+            return
+        if self.custom_steps and messagebox.askyesno("Clear All", "Remove all custom steps?"):
+            self.custom_steps.clear()
+            self._update_custom_ui()
+
+    def _update_custom_ui(self):
+        self.custom_steps_listbox.delete(0, tk.END)
+        for idx, (level, dur) in enumerate(self.custom_steps):
+            self.custom_steps_listbox.insert(tk.END, f"Step {idx+1}: {level:.4g} A  {dur*1000:.0f} ms")
+        total = sum(dur for _, dur in self.custom_steps)
+        self.lbl_custom_period.config(text=f"Total Cycle Period: {total:.3f} s")
+        # Also update period label for other shapes? Not needed.
+
+    def _on_cycles_changed(self, event=None):
+        """If cycles > 0, compute total time and disable total time entry."""
+        try:
+            cycles = int(self.ent_cycles.get())
+        except ValueError:
+            cycles = 0
+        if cycles > 0 and not self.inf_run_var.get():
+            period = self._get_current_period()
+            total_time = cycles * period + 2.0  # buffer 2s
+            self.ent_tot.config(state='normal')
+            self.ent_tot.delete(0, tk.END)
+            self.ent_tot.insert(0, f"{total_time:.3f}")
+            self.ent_tot.config(state='disabled')
+        else:
+            self.ent_tot.config(state='normal')
+            if self.inf_run_var.get():
+                self.ent_tot.config(state='disabled')
+            else:
+                # If cycles == 0, enable total time
+                pass
 
     # ------------------------------------------------------------------
     # Data Array Generation Logic 
@@ -983,28 +1117,9 @@ class App:
             except: return 4.0
         elif shape == "Temple Run": 
             return 14.0
-        elif shape == "Temple Run (General)":
-            try:
-                base = self.safe_float(self.ent_min, 0.0)
-                peak = self.safe_float(self.ent_max, 0.040)
-                t_base = self.safe_float(self.tr_base_time_var, 5.0)
-                t_step = self.safe_float(self.tr_step_time_var, 1.0)
-                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
-                if step_sz <= 0: step_sz = 0.010
-                
-                count = 1 
-                c = base + step_sz
-                while c < peak - 1e-9:
-                    count += 1
-                    c += step_sz
-                    if count > 1000: break
-                c = peak - step_sz
-                while c > base + 1e-9:
-                    count += 1
-                    c -= step_sz
-                    if count > 1000: break
-                return t_base + (count * t_step)
-            except: return 10.0
+        elif shape == "Custom Pattern":
+            total = sum(dur for _, dur in self.custom_steps)
+            return total if total > 0 else 1.0
         elif shape == "Constant DC": 
             return 1.0
         else:
@@ -1013,10 +1128,6 @@ class App:
     def _update_dynamic_ui(self, *args):
         period = self._get_current_period()
         shape = self.shape_var.get()
-        
-        if shape == "Temple Run (General)":
-            self.lbl_tr_period.config(text=f"Total Cycle Period: {period:.3f}s")
-            
         if shape == "Pulse":
             try:
                 b = float(self.pulse_base_var.get())
@@ -1024,14 +1135,8 @@ class App:
                 duty = (p / period) * 100 if period > 0 else 0
                 self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {period:.3f}s")
             except: pass
-            
-        if self.max_pts_var.get():
-            max_allowed = int(period / 1e-5)
-            max_allowed = min(max_allowed, 100000) 
-            self.ent_pts.config(state='normal')
-            self.ent_pts.delete(0, tk.END)
-            self.ent_pts.insert(0, str(max_allowed))
-            self.ent_pts.config(state='disabled')
+        # Update cycles total time if needed
+        self._on_cycles_changed()
 
     def _generate_waveform_arrays(self, pts):
         shape = self.shape_var.get()
@@ -1040,36 +1145,12 @@ class App:
         period = self._get_current_period()
         
         if period <= 0: period = 1.0
-        step_time = period / pts
+        step_time = period / pts if pts > 0 else 1.0
         list_vals = []
         
-        if "Temple Run" in shape:
-            if shape == "Temple Run":
-                tr_levels = [0.0, 0.0015, 0.010, 0.020, 0.030, 0.040, 0.030, 0.020, 0.010, 0.0015]
-                tr_durs = [5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-            else:
-                t_base = self.safe_float(self.tr_base_time_var, 5.0)
-                t_step = self.safe_float(self.tr_step_time_var, 1.0)
-                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
-                if step_sz <= 0: step_sz = 0.001
-                
-                tr_levels = [base]
-                tr_durs = [t_base]
-                c_val = base + step_sz
-                while c_val < peak - 1e-9:
-                    tr_levels.append(c_val)
-                    tr_durs.append(t_step)
-                    c_val += step_sz
-                    if len(tr_levels) > 500: break
-                tr_levels.append(peak)
-                tr_durs.append(t_step)
-                c_val = peak - step_sz
-                while c_val > base + 1e-9:
-                    tr_levels.append(c_val)
-                    tr_durs.append(t_step)
-                    c_val -= step_sz
-                    if len(tr_levels) > 500: break
-            
+        if shape == "Temple Run":
+            tr_levels = [0.0, 0.0015, 0.010, 0.020, 0.030, 0.040, 0.030, 0.020, 0.010, 0.0015]
+            tr_durs = [5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
             cumulative_times = [sum(tr_durs[:i+1]) for i in range(len(tr_durs))]
             for tick in range(pts):
                 t = tick * step_time
@@ -1079,6 +1160,22 @@ class App:
                         break
                 else:
                     list_vals.append(round(tr_levels[-1], 6))
+        
+        elif shape == "Custom Pattern":
+            if not self.custom_steps:
+                return [], period
+            steps = self.custom_steps
+            boundaries = [0.0]
+            for _, dur in steps:
+                boundaries.append(boundaries[-1] + dur)
+            for tick in range(pts):
+                t = tick * step_time
+                for i in range(len(steps)):
+                    if boundaries[i] <= t < boundaries[i+1]:
+                        list_vals.append(round(steps[i][0], 6))
+                        break
+                else:
+                    list_vals.append(round(steps[-1][0], 6))
         
         elif "Custom" in shape:
             if not self.custom_list_vals: return [], period
@@ -1105,141 +1202,58 @@ class App:
 
         return list_vals, period
 
-# ------------------------------------------------------------------
-    # Data Array Generation Logic 
     # ------------------------------------------------------------------
-    def safe_float(self, entry, default=0.0):
-        try: return float(entry.get())
-        except ValueError: return default
-
-    def _get_current_period(self):
+    # Preview Waveform (one cycle)
+    # ------------------------------------------------------------------
+    def _preview_waveform(self):
+        """Open a new window showing one cycle of the current waveform."""
         shape = self.shape_var.get()
-        if shape == "Pulse":
-            try: return float(self.pulse_base_var.get()) + float(self.pulse_peak_var.get())
-            except: return 4.0
-        elif shape == "Temple Run": 
-            return 14.0
-        elif shape == "Temple Run (General)":
-            try:
-                base = self.safe_float(self.ent_min, 0.0)
-                peak = self.safe_float(self.ent_max, 0.040)
-                t_base = self.safe_float(self.tr_base_time_var, 5.0)
-                t_step = self.safe_float(self.tr_step_time_var, 1.0)
-                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
-                if step_sz <= 0: step_sz = 0.010
-                
-                count = 1 
-                c = base + step_sz
-                while c < peak - 1e-9:
-                    count += 1
-                    c += step_sz
-                    if count > 1000: break
-                c = peak - step_sz
-                while c > base + 1e-9:
-                    count += 1
-                    c -= step_sz
-                    if count > 1000: break
-                return t_base + (count * t_step)
-            except: return 10.0
-        elif shape == "Constant DC": 
-            return 1.0
-        else:
-            return self.safe_float(self.ent_per, 4.0)
-
-    def _update_dynamic_ui(self, *args):
         period = self._get_current_period()
-        shape = self.shape_var.get()
-        
-        if shape == "Temple Run (General)":
-            self.lbl_tr_period.config(text=f"Total Cycle Period: {period:.3f}s")
-            
-        if shape == "Pulse":
-            try:
-                b = float(self.pulse_base_var.get())
-                p = float(self.pulse_peak_var.get())
-                duty = (p / period) * 100 if period > 0 else 0
-                self.lbl_duty.config(text=f"Duty Cycle: {duty:.1f}% | Total Period: {period:.3f}s")
-            except: pass
-            
-        if self.max_pts_var.get():
-            max_allowed = int(period / 1e-5)
-            max_allowed = min(max_allowed, 100000) 
-            self.ent_pts.config(state='normal')
-            self.ent_pts.delete(0, tk.END)
-            self.ent_pts.insert(0, str(max_allowed))
-            self.ent_pts.config(state='disabled')
+        if period <= 0:
+            messagebox.showerror("Error", "Invalid period.")
+            return
+        # Get sampling rate
+        sampling_rate = self.safe_float(self.ent_sampling, 100)
+        if sampling_rate <= 0: sampling_rate = 100
+        pts = int(sampling_rate * period)
+        if pts < 2: pts = 2
+        if pts > 5000: pts = 5000  # limit for preview
 
-    def _generate_waveform_arrays(self, pts):
-        shape = self.shape_var.get()
-        base = self.safe_float(self.ent_min, 0.005)
-        peak = self.safe_float(self.ent_max, 0.040)
-        period = self._get_current_period()
-        
-        if period <= 0: period = 1.0
-        step_time = period / pts
-        list_vals = []
-        
-        if "Temple Run" in shape:
-            if shape == "Temple Run":
-                tr_levels = [0.0, 0.0015, 0.010, 0.020, 0.030, 0.040, 0.030, 0.020, 0.010, 0.0015]
-                tr_durs = [5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-            else:
-                t_base = self.safe_float(self.tr_base_time_var, 5.0)
-                t_step = self.safe_float(self.tr_step_time_var, 1.0)
-                step_sz = self.safe_float(self.tr_step_size_var, 0.010)
-                if step_sz <= 0: step_sz = 0.001
-                
-                tr_levels = [base]
-                tr_durs = [t_base]
-                c_val = base + step_sz
-                while c_val < peak - 1e-9:
-                    tr_levels.append(c_val)
-                    tr_durs.append(t_step)
-                    c_val += step_sz
-                    if len(tr_levels) > 500: break
-                tr_levels.append(peak)
-                tr_durs.append(t_step)
-                c_val = peak - step_sz
-                while c_val > base + 1e-9:
-                    tr_levels.append(c_val)
-                    tr_durs.append(t_step)
-                    c_val -= step_sz
-                    if len(tr_levels) > 500: break
-            
-            cumulative_times = [sum(tr_durs[:i+1]) for i in range(len(tr_durs))]
-            for tick in range(pts):
-                t = tick * step_time
-                for i, c_time in enumerate(cumulative_times):
-                    if t < c_time + 1e-9:
-                        list_vals.append(round(tr_levels[i], 6))
-                        break
-                else:
-                    list_vals.append(round(tr_levels[-1], 6))
-        
-        elif "Custom" in shape:
-            if not self.custom_list_vals: return [], period
-            list_vals = self.custom_list_vals
-            
-        elif "Constant DC" in shape:
-            list_vals = [base] * pts
-            
-        else:
-            amp, off = (peak - base) / 2.0, (peak + base) / 2.0
-            t_base = self.safe_float(self.pulse_base_var, 2.0)
-            
-            for tick in range(pts):
-                t = tick * step_time
-                if "Sine" in shape:    val = off - amp * math.cos(2 * math.pi * (t / period))
-                elif "Cosine" in shape:val = off + amp * math.cos(2 * math.pi * (t / period))
-                elif "Pulse" in shape: val = base if t < t_base else peak
-                elif "Triangle" in shape:
-                    if tick < pts/2: val = base + (peak - base) * (tick / (pts/2))
-                    else:            val = peak - (peak - base) * ((tick - pts/2) / (pts/2))
-                elif "Staircase" in shape: val = base + (peak - base) * (tick / pts)
-                else: val = base
-                list_vals.append(round(val, 6))
+        list_vals, _ = self._generate_waveform_arrays(pts)
+        if not list_vals:
+            messagebox.showerror("Error", "Could not generate waveform. Check settings.")
+            return
 
-        return list_vals, period
+        # Create time array
+        t = np.linspace(0, period, len(list_vals))
+
+        # Create a new window with pyqtgraph
+        win = QtWidgets.QMainWindow()
+        win.setWindowTitle("Waveform Preview (One Cycle)")
+        win.setGeometry(100, 100, 600, 400)
+        central_widget = QtWidgets.QWidget()
+        win.setCentralWidget(central_widget)
+        layout = QtWidgets.QVBoxLayout(central_widget)
+
+        plot_widget = pg.PlotWidget()
+        layout.addWidget(plot_widget)
+
+        # Plot
+        plot_widget.plot(t, list_vals, pen=pg.mkPen(color='b', width=2))
+        plot_widget.setLabel('left', 'Level', units='A' if "Current" in self.src_mode_var.get() else 'V')
+        plot_widget.setLabel('bottom', 'Time', units='s')
+        plot_widget.setTitle(f"{shape} - Period = {period:.3f} s, Samples = {len(list_vals)}")
+
+        # Show some stats
+        stats = f"Min: {min(list_vals):.4g}, Max: {max(list_vals):.4g}, Mean: {np.mean(list_vals):.4g}"
+        label = QtWidgets.QLabel(stats)
+        label.setStyleSheet("font-family: Segoe UI; font-size: 10px; color: #2563eb;")
+        layout.addWidget(label)
+
+        win.show()
+        # Keep reference to avoid garbage collection
+        self._preview_window = win
+
     # ------------------------------------------------------------------
     # Hardware SMU Control Functions
     # ------------------------------------------------------------------
@@ -1303,9 +1317,6 @@ class App:
             df = pd.read_csv(path, header=None)
             self.custom_list_vals = df.iloc[:, 0].dropna().tolist()
             self.lbl_custom.config(text=f"Loaded: {len(self.custom_list_vals)} points", fg=Theme.ACC)
-            self.ent_pts.config(state='normal')
-            self.ent_pts.delete(0, tk.END)
-            self.ent_pts.insert(0, str(len(self.custom_list_vals)))
         except Exception as e:
             messagebox.showerror("File Error", str(e))
 
@@ -1320,7 +1331,6 @@ class App:
         self.lbl_exp_status.config(text="ABORTING...", fg=Theme.ERR)
         if self.smu:
             try:
-                # INSTANT HARDWARE ABORT: Frees the thread immediately without waiting for chunk finish
                 self.smu.write(":ABOR") 
             except: pass
 
@@ -1357,10 +1367,20 @@ class App:
         if inf_run:
             self.test_target_duration = float('inf')
         else:
+            # Check if cycles > 0 and total time is computed
             try:
-                self.test_target_duration = float(self.ent_tot.get())
+                cycles = int(self.ent_cycles.get())
             except ValueError:
-                self.test_target_duration = 12.0
+                cycles = 0
+            if cycles > 0:
+                period = self._get_current_period()
+                self.test_target_duration = cycles * period + 2.0  # buffer 2s
+                # Update total time entry (already disabled)
+            else:
+                try:
+                    self.test_target_duration = float(self.ent_tot.get())
+                except ValueError:
+                    self.test_target_duration = 12.0
             
         self.test_start_time = time.time()
         self.lbl_exp_status.config(text="EXPERIMENT RUNNING...", fg="#f59e0b")
@@ -1374,7 +1394,6 @@ class App:
         if "Auto" in msr_sel:
             msr_label = "Measured (Voltage (V))" if "Current" in self.src_mode_var.get() else "Measured (Current (A))"
         
-        # Absolute Zero-Time Graph Reset
         self.global_datasets.clear()
         self.registry_keys.clear()
         
@@ -1406,15 +1425,32 @@ class App:
             inf_run = self.inf_run_var.get()
             msr_sel = self.msr_mode_var.get()
             
-            pts = int(self.safe_float(self.ent_pts, 360))
-            pts = max(10, min(pts, 100000))
+            sampling_rate = self.safe_float(self.ent_sampling, 100)
+            if sampling_rate <= 0: sampling_rate = 100
             
-            try: total_time = float(self.ent_tot.get())
-            except ValueError: total_time = 12.0
+            period = self._get_current_period()
+            if period <= 0: period = 1.0
+            pts = int(sampling_rate * period)
+            if pts < 2: pts = 2
+            if pts > 100000: pts = 100000
             
-            # Mathematical Pipeline Generator
+            # Total time and cycles handling
+            if inf_run:
+                total_ticks = float('inf')
+            else:
+                try:
+                    cycles = int(self.ent_cycles.get())
+                except ValueError:
+                    cycles = 0
+                if cycles > 0:
+                    total_time = cycles * period + 2.0  # buffer
+                else:
+                    total_time = self.safe_float(self.ent_tot, 12.0)
+                total_ticks = int(total_time / (period / pts)) if period > 0 else 0
+            
             list_vals, period = self._generate_waveform_arrays(pts)
-            if not list_vals: raise ValueError("Empty waveform array generated.")
+            if not list_vals:
+                raise ValueError("Empty waveform array generated. Check your configuration.")
                 
             step_time = period / pts
             initial_val = list_vals[0]
@@ -1444,26 +1480,21 @@ class App:
             self.smu.write(f":SENS:VOLT:APER {ap_val}")
             self.smu.write(f":SENS:CURR:APER {ap_val}")
 
-            # TRUE CONTINUOUS REAL-TIME PIPELINE CHUNKING LOGIC
-            target_chunk_time = 0.25 # Updates UI 4 times per second (Zero Lag)
+            target_chunk_time = 0.25
             if "Constant DC" in self.shape_var.get():
                 cycles_per_chunk = 1
             else:
                 cycles_per_chunk = max(1, math.floor(target_chunk_time / period))
                 
             ticks_per_chunk = int(cycles_per_chunk * pts)
-            
-            # Anti-Hang Limit: Ensure no single USB fetch exceeds 20k points
             MAX_POINTS_PER_CHUNK = 20000 
             if ticks_per_chunk > MAX_POINTS_PER_CHUNK:
                 cycles_per_chunk = max(1, MAX_POINTS_PER_CHUNK // pts)
                 ticks_per_chunk = int(cycles_per_chunk * pts)
 
             if inf_run:
-                total_ticks = float('inf')
                 num_chunks = float('inf')
             else:
-                total_ticks = int(total_time / step_time)
                 num_chunks = math.ceil(total_ticks / ticks_per_chunk)
 
             self.smu.write(":TRIG:TRAN:SOUR TIM")
@@ -1472,7 +1503,6 @@ class App:
             self.smu.write(f":TRIG:ACQ:TIM {step_time}")
             self.smu.write(":FORM:DATA ASC")
 
-            # EXPLICIT 3-COLUMN CSV INITIALIZATION
             save_file = self.save_var.get()
             csv_msr_label = f"Measured ({msr_sel})"
             if "Auto" in msr_sel:
@@ -1489,7 +1519,6 @@ class App:
                 if not inf_run and chunk >= num_chunks:
                     break
                 
-                # CRITICAL MEMORY FIX: Wipes internal memory buffer so it never fills up and stops
                 self.smu.write(":TRAC:CLE") 
                 
                 if inf_run:
@@ -1506,7 +1535,6 @@ class App:
                 self.smu.timeout = int(((t_count * step_time) + 10) * 1000)
                 self.smu.write("*WAI")
                 
-                # Instant Abort Protection inside the waiting loop
                 if not self.is_running: break
                 
                 t = self.smu.query_ascii_values(":FETC:ARR:TIME?")
@@ -1515,14 +1543,12 @@ class App:
                 
                 if not t: break
                 
-                # Perfect Zero-Stitch Time Math
                 chunk_start_time = t[0]
                 t_rel = [(x - chunk_start_time) + global_t for x in t]
                 
                 v_arr = np.array(v)
                 c_arr = np.array(c)
                 
-                # Dynamic MSR Logic Selection (For UI and exactly matched for CSV)
                 if "Voltage" in msr_sel: msr_data = v_arr
                 elif "Current" in msr_sel: msr_data = c_arr
                 elif "Power" in msr_sel: msr_data = v_arr * c_arr
@@ -1534,7 +1560,6 @@ class App:
                     
                 src_data = c_arr if mode_curr else v_arr
                 
-                # SUPER FAST 3-COLUMN CSV WRITE (Writerows is 100x faster than Writerow)
                 with open(save_file, 'a', newline='', encoding='utf-8') as f:
                     csv.writer(f).writerows(zip(t_rel, src_data, msr_data))
                 
@@ -1542,7 +1567,6 @@ class App:
                 global_t += (t_count * step_time)
                 chunk += 1
 
-            # SAFE EXIT (Never collides with _stop_test threading)
             if off_mode == "Hold Last Level":
                 self.smu.write(f":SOUR:{src_str}:MODE FIX")
                 self.smu.write(f":SOUR:{src_str} {final_val}") 
@@ -1715,7 +1739,6 @@ class App:
             df.columns = [str(c).strip() for c in df.columns]
             filename = os.path.basename(path)
             
-            # Simple automatic dataset appending for offline analysis
             d_id = filename
             counter = 1
             while d_id in self.global_datasets:
@@ -1739,7 +1762,7 @@ class App:
             messagebox.showerror('Parsing Error', f"Could not process file:\n{str(ex)}")
 
     def _on_import_confirmed(self, filename, df, x_col, y_col, start_row, end_row, trace_name, scale, line_style, existing_id=None):
-        pass # Disabling explicit manual import flow for cleaner streaming UI
+        pass
 
     def _update_selection_combos(self):
         vals = [self.global_datasets[k]["trace_name"] for k in self.registry_keys]
