@@ -604,6 +604,9 @@ class App:
         self.unit_min_var = tk.StringVar(value="A")
         self.unit_max_var = tk.StringVar(value="A")
 
+        # 2-Wire / 4-Wire mode selector
+        self.wire_mode_var = tk.StringVar(value="2W")
+
         # Create Qt application instance for preview windows
         self.qt_app = QtWidgets.QApplication.instance()
         if self.qt_app is None:
@@ -685,6 +688,27 @@ class App:
 
         cfg_sec = sec(smu_inner, "TEST CONFIGURATION")
         
+        # ---- 2-Wire / 4-Wire mode selector ----
+        wire_frame = tk.Frame(cfg_sec, bg=Theme.PNL)
+        wire_frame.pack(fill='x', pady=(4, 4))
+        tk.Label(wire_frame, text="Measurement Mode:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
+
+        # Use two canvas circles as radio buttons
+        self.wire_canvas_2w = tk.Canvas(wire_frame, width=16, height=16, bg=Theme.PNL, highlightthickness=0)
+        self.wire_canvas_2w.pack(side='left', padx=(4,0))
+        self.wire_circle_2w = self.wire_canvas_2w.create_oval(2,2,14,14, outline=Theme.DIM, fill=Theme.ACC if self.wire_mode_var.get()=="2W" else Theme.PNL2)
+        self.wire_canvas_2w.bind("<Button-1>", lambda e: self._set_wire_mode("2W"))
+
+        tk.Label(wire_frame, text="2-Wire", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(side='left', padx=(4,10))
+
+        self.wire_canvas_4w = tk.Canvas(wire_frame, width=16, height=16, bg=Theme.PNL, highlightthickness=0)
+        self.wire_canvas_4w.pack(side='left')
+        self.wire_circle_4w = self.wire_canvas_4w.create_oval(2,2,14,14, outline=Theme.DIM, fill=Theme.ACC if self.wire_mode_var.get()=="4W" else Theme.PNL2)
+        self.wire_canvas_4w.bind("<Button-1>", lambda e: self._set_wire_mode("4W"))
+
+        tk.Label(wire_frame, text="4-Wire", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(side='left', padx=(4,0))
+
+        # Source mode
         self.src_mode_var = tk.StringVar(value="Current (A)")
         tk.Label(cfg_sec, text="Source Mode:", bg=Theme.PNL, fg=Theme.FG, font=('Segoe UI', 8)).pack(anchor='w')
         cb_src = ttk.Combobox(cfg_sec, textvariable=self.src_mode_var, values=["Current (A)", "Voltage (V)"], state="readonly", font=('Segoe UI', 8))
@@ -1037,6 +1061,22 @@ class App:
         self.chart_container.pack(fill='both', expand=True, padx=4, pady=4)
 
     # ------------------------------------------------------------------
+    # Wire mode setter and UI updater
+    # ------------------------------------------------------------------
+    def _set_wire_mode(self, mode):
+        self.wire_mode_var.set(mode)
+        self._update_wire_mode_ui()
+
+    def _update_wire_mode_ui(self):
+        """Update the circle colors based on selected mode."""
+        if self.wire_mode_var.get() == "2W":
+            self.wire_canvas_2w.itemconfig(self.wire_circle_2w, fill=Theme.ACC)
+            self.wire_canvas_4w.itemconfig(self.wire_circle_4w, fill=Theme.PNL2)
+        else:
+            self.wire_canvas_4w.itemconfig(self.wire_circle_4w, fill=Theme.ACC)
+            self.wire_canvas_2w.itemconfig(self.wire_circle_2w, fill=Theme.PNL2)
+
+    # ------------------------------------------------------------------
     # Custom Pattern Step Management (with Lock, Edit, Insert, Export, Import)
     # ------------------------------------------------------------------
     def _toggle_custom_lock(self):
@@ -1051,7 +1091,6 @@ class App:
             self.btn_clear_steps.config(state='disabled')
             self.btn_import_csv.config(state='disabled')
             self.custom_steps_listbox.config(state='disabled')
-            # Export remains enabled
         else:
             self.btn_lock_custom.config(text="🔒 Lock Pattern", bg=Theme.PNL2, fg=Theme.ACC)
             self.btn_add_step.config(state='normal')
@@ -1127,7 +1166,6 @@ class App:
                 dur_ms = float(entry_dur.get())
                 if dur_ms <= 0:
                     raise ValueError("Duration must be positive")
-                # Convert level to Amps
                 unit = unit_level_var.get()
                 if unit == "mA":
                     level_val *= 1e-3
@@ -1211,14 +1249,12 @@ class App:
             return
         try:
             df = pd.read_csv(file_path)
-            # Expect at least two columns: Level and Duration
             if len(df.columns) < 2:
                 raise ValueError("CSV must have at least two columns: Level (A) and Duration (s)")
             levels = df.iloc[:, 0].values
             durs = df.iloc[:, 1].values
             if len(levels) != len(durs):
                 raise ValueError("Level and Duration columns must have same length.")
-            # Clear and load
             self.custom_steps = [(float(levels[i]), float(durs[i])) for i in range(len(levels))]
             self._update_custom_ui()
             messagebox.showinfo("Import Successful", f"Imported {len(self.custom_steps)} steps from:\n{file_path}")
@@ -1588,6 +1624,9 @@ class App:
             inf_run = self.inf_run_var.get()
             msr_sel = self.msr_mode_var.get()
             
+            # 2-Wire / 4-Wire selection
+            wire_mode = self.wire_mode_var.get()
+            
             sampling_rate = self.safe_float(self.ent_sampling, 100)
             if sampling_rate <= 0: sampling_rate = 100
             # Cap sampling rate at 1000
@@ -1624,7 +1663,11 @@ class App:
             self.smu.write("*RST")
             self.smu.write("*CLS")
             
-            self.smu.write(":SENS:REMO OFF")
+            # Set remote sense based on wire mode
+            if wire_mode == "4W":
+                self.smu.write(":SENS:REMO ON")
+            else:
+                self.smu.write(":SENS:REMO OFF")
             self.smu.write(":SENS:AVER:STAT OFF")
             
             src_str = "CURR" if mode_curr else "VOLT"
@@ -1821,6 +1864,9 @@ class App:
                 
         apply_theme_recursive(self.root)
         
+        # Update wire mode UI colors after theme toggle
+        self._update_wire_mode_ui()
+
         sty = ttk.Style()
         sty.configure('Sim.TNotebook', background=Theme.BG)
         sty.configure('Sim.TNotebook.Tab', background=Theme.PNL2, foreground=Theme.DIM)
