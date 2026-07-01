@@ -1660,14 +1660,24 @@ class App:
             final_val = list_vals[-1]
             max_val = max([abs(v) for v in list_vals])
 
+            # Reset instrument to known state
             self.smu.write("*RST")
             self.smu.write("*CLS")
             
-            # Set remote sense based on wire mode
+            # ----- CRITICAL: Set remote sensing based on wire mode -----
+            # Using the correct SCPI syntax: :SENS:REMO
             if wire_mode == "4W":
-                self.smu.write(":SENS:REMO ON")
+                self.smu.write(":SENSe:REMote 1")
             else:
-                self.smu.write(":SENS:REMO OFF")
+                self.smu.write(":SENSe:REMote 1")
+            # Add small settling delay for the hardware to switch
+            time.sleep(0.05)
+            
+            # Optional: verify setting (for debugging)
+            # status = self.smu.query(":SENS:REMO?")
+            # print(f"Remote sensing status: {status}")
+            
+            # Continue with other settings
             self.smu.write(":SENS:AVER:STAT OFF")
             
             src_str = "CURR" if mode_curr else "VOLT"
