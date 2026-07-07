@@ -1,0 +1,14 @@
+# Ignore the virtual environment folder
+# (Change 'venv/' if you named your virtual environment something else, like 'env/')
+venv/
+env/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore the generated data files so you don't push massive datasets
+*.csv
+
+# Ignore OS generated files
+.DS_Store

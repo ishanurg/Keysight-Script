@@ -1,0 +1,10 @@
+{
+  "tcp_ip": "192.168.0.100",
+  "tcp_port": 5025,
+  "tcp_timeout": 5.0,
+  "level": 2.0,
+  "compliance": 0.25,
+  "sweep_start": 0.0,
+  "sweep_stop": 10.0,
+  "sweep_steps": 20
+}
